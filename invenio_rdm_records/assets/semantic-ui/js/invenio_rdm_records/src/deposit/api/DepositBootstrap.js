@@ -115,7 +115,23 @@ class DepositBootstrapComponent extends Component {
   };
 
   render() {
-    const { errors, record, children } = this.props;
+    const {
+      errors,
+      record,
+      children,
+      validateOnBlur,
+      validateOnChange,
+      validateOnMount,
+      validationSchema,
+    } = this.props;
+
+    const validationProps = {
+      ...(validateOnBlur !== undefined && { validateOnBlur }),
+      ...(validateOnChange !== undefined && { validateOnChange }),
+      ...(validateOnMount !== undefined && { validateOnMount }),
+      ...(validationSchema !== undefined && { validationSchema }),
+    }
+
     return (
       <DepositFormSubmitContext.Provider
         value={{ setSubmitContext: this.setSubmitContext }}
@@ -133,6 +149,7 @@ class DepositBootstrapComponent extends Component {
             initialValues: record,
             // errors need to be repopulated after form is reinitialised
             ...(errors && { initialErrors: errors }),
+            ...validationProps
           }}
         >
           {children}
@@ -154,12 +171,20 @@ DepositBootstrapComponent.propTypes = {
   reservePIDAction: PropTypes.func.isRequired,
   discardPIDAction: PropTypes.func.isRequired,
   fileUploadOngoing: PropTypes.bool,
+  validateOnBlur: PropTypes.bool,
+  validateOnChange: PropTypes.bool,
+  validateOnMount: PropTypes.bool,
+  validationSchema: PropTypes.object,
 };
 
 DepositBootstrapComponent.defaultProps = {
   errors: undefined,
   children: undefined,
   fileUploadOngoing: false,
+  validateOnBlur: undefined,
+  validateOnChange: undefined,
+  validateOnMount: undefined,
+  validationSchema: undefined,
 };
 
 const mapStateToProps = (state) => {

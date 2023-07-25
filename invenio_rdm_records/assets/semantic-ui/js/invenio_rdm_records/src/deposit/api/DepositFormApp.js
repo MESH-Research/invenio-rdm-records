@@ -82,12 +82,25 @@ export class DepositFormApp extends Component {
   }
 
   render() {
-    const { children } = this.props;
+    const {
+      children,
+      validateOnBlur,
+      validateOnChange,
+      validateOnMount,
+      validationSchema,
+    } = this.props;
 
     return (
       <Provider store={this.store}>
         <I18nextProvider i18n={i18next}>
-          <DepositBootstrap>{children}</DepositBootstrap>
+          <DepositBootstrap
+            validateOnBlur={validateOnBlur}
+            validateOnChange={validateOnChange}
+            validateOnMount={validateOnMount}
+            validationSchema={validationSchema}
+          >
+            {children}
+          </DepositBootstrap>
         </I18nextProvider>
       </Provider>
     );
@@ -106,6 +119,10 @@ DepositFormApp.propTypes = {
   filesService: PropTypes.instanceOf(DepositFilesService),
   recordSerializer: PropTypes.instanceOf(DepositRecordSerializer),
   children: PropTypes.node,
+  validateOnBlur: PropTypes.bool,
+  validateOnChange: PropTypes.bool,
+  validateOnMount: PropTypes.bool,
+  validationSchema: PropTypes.object,
 };
 
 DepositFormApp.defaultProps = {
@@ -118,4 +135,8 @@ DepositFormApp.defaultProps = {
   recordSerializer: undefined,
   files: undefined,
   children: undefined,
+  validateOnBlur: undefined,
+  validateOnChange: undefined,
+  validateOnMount: undefined,
+  validationSchema: undefined,
 };
