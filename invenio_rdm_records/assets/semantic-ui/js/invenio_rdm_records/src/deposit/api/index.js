@@ -9,3 +9,5 @@ export { DepositApiClient } from "./DepositApiClient";
 
 export { DepositFormApp } from "./DepositFormApp";
 export { DepositRecordSerializer } from "./DepositRecordSerializer";
+export { DepositFormSubmitContext,
+         DepositFormSubmitActions } from "./DepositFormSubmitContext";
