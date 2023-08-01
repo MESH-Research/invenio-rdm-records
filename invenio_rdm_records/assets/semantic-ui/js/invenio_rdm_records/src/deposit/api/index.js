@@ -11,5 +11,5 @@ export { DepositFormApp } from "./DepositFormApp";
 export { DepositRecordSerializer } from "./DepositRecordSerializer";
 export {
   DepositFormSubmitContext,
-  DepositFormSubmitActions
+  DepositFormSubmitActions,
 } from "./DepositFormSubmitContext";
