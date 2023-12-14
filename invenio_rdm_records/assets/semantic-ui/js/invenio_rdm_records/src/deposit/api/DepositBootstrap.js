@@ -115,7 +115,7 @@ class DepositBootstrapComponent extends Component {
   };
 
   render() {
-    const { errors, record, children } = this.props;
+    const { errors, record, validate, validationSchema, children } = this.props;
     return (
       <DepositFormSubmitContext.Provider
         value={{ setSubmitContext: this.setSubmitContext }}
@@ -131,6 +131,8 @@ class DepositBootstrapComponent extends Component {
             // is requested on each action, generating countless drafts
             enableReinitialize: true,
             initialValues: record,
+            validate: validate,
+            validationSchema: validationSchema,
             // errors need to be repopulated after form is reinitialised
             ...(errors && { initialErrors: errors }),
           }}
