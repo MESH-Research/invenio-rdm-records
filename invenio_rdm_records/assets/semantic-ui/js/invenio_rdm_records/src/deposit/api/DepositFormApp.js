@@ -87,10 +87,7 @@ export class DepositFormApp extends Component {
     return (
       <Provider store={this.store}>
         <I18nextProvider i18n={i18next}>
-          <DepositBootstrap
-            validate={validate}
-            validationSchema={validationSchema}
-          >
+          <DepositBootstrap validate={validate} validationSchema={validationSchema}>
             {children}
           </DepositBootstrap>
         </I18nextProvider>

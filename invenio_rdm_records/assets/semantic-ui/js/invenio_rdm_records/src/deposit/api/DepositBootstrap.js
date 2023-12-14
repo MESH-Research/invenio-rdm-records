@@ -156,12 +156,16 @@ DepositBootstrapComponent.propTypes = {
   reservePIDAction: PropTypes.func.isRequired,
   discardPIDAction: PropTypes.func.isRequired,
   fileUploadOngoing: PropTypes.bool,
+  validate: PropTypes.func,
+  validationSchema: PropTypes.object,
 };
 
 DepositBootstrapComponent.defaultProps = {
   errors: undefined,
   children: undefined,
   fileUploadOngoing: false,
+  validate: undefined,
+  validationSchema: undefined,
 };
 
 const mapStateToProps = (state) => {
