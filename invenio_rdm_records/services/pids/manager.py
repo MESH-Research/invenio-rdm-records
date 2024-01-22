@@ -83,7 +83,9 @@ class PIDManager:
                     errors.append(
                         {
                             "field": f"pids.{scheme}",
-                            "messages": [_("Invalid {scheme}").format(scheme=label)],
+                            "messages": [
+                                _("Invalid {scheme}").format(scheme=label)
+                            ],
                         }
                     )
                 else:
@@ -114,7 +116,9 @@ class PIDManager:
         provider_pid_dicts = self._get_providers(pids)
 
         for provider, pid_dict in provider_pid_dicts:
-            success, provider_errors = provider.validate(record=record, **pid_dict)
+            success, provider_errors = provider.validate(
+                record=record, **pid_dict
+            )
             if not success:
                 errors.extend(provider_errors)
 
@@ -170,7 +174,10 @@ class PIDManager:
                     field_name=f"pids.{scheme}",
                 )
             pid = provider.create(draft)
-            pid_attrs = {"identifier": pid.pid_value, "provider": provider.name}
+            pid_attrs = {
+                "identifier": pid.pid_value,
+                "provider": provider.name,
+            }
 
         if provider.client:  # provider and identifier already in dict
             pid_attrs["client"] = provider.client.name
@@ -201,7 +208,9 @@ class PIDManager:
         pid_attrs = record.pids.get(scheme, None)
         if not pid_attrs:
             raise ValidationError(
-                message=_("PID not found for type {scheme}").format(scheme=scheme),
+                message=_("PID not found for type {scheme}").format(
+                    scheme=scheme
+                ),
                 field_name="pids",
             )
 
@@ -220,14 +229,18 @@ class PIDManager:
     def reserve_all(self, draft, pids):
         """Reserve PIDs from a list."""
         for scheme, pid_attrs in pids.items():
-            self.reserve(draft, scheme, pid_attrs["identifier"], pid_attrs["provider"])
+            self.reserve(
+                draft, scheme, pid_attrs["identifier"], pid_attrs["provider"]
+            )
 
     def register(self, record, scheme, url):
         """Register a PID of a record."""
         pid_attrs = record.pids.get(scheme, None)
         if not pid_attrs:
             raise ValidationError(
-                message=_("PID not found for type {scheme}").format(scheme=scheme),
+                message=_("PID not found for type {scheme}").format(
+                    scheme=scheme
+                ),
                 field_name="pids",
             )
 
@@ -236,7 +249,9 @@ class PIDManager:
 
         provider.register(pid, record=record, url=url)
 
-    def discard(self, scheme, identifier, provider_name=None, soft_delete=False):
+    def discard(
+        self, scheme, identifier, provider_name=None, soft_delete=False
+    ):
         """Discard a PID."""
         provider = self._get_provider(scheme, provider_name)
         pid = provider.get(identifier)
@@ -250,8 +265,8 @@ class PIDManager:
                     {
                         "field": f"pids.{scheme}",
                         "message": _(
-                            "Cannot discard a reserved or registered persistent "
-                            "identifier."
+                            "Cannot discard a reserved or registered"
+                            " persistent identifier."
                         ),
                     }
                 ]

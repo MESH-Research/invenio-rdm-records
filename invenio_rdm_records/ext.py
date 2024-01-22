@@ -43,7 +43,10 @@ from .resources.config import (
     RDMDraftMediaFilesResourceConfig,
     RDMRecordMediaFilesResourceConfig,
 )
-from .resources.resources import RDMRecordCommunitiesResource, RDMRecordRequestsResource
+from .resources.resources import (
+    RDMRecordCommunitiesResource,
+    RDMRecordRequestsResource,
+)
 from .services import (
     CommunityRecordsService,
     IIIFService,
@@ -133,7 +136,9 @@ class InvenioRDMRecords(object):
 
         class ServiceConfigs:
             record = RDMRecordServiceConfig.build(app)
-            record_with_media_files = RDMRecordMediaFilesServiceConfig.build(app)
+            record_with_media_files = RDMRecordMediaFilesServiceConfig.build(
+                app
+            )
             file = RDMFileRecordServiceConfig.build(app)
             file_draft = RDMFileDraftServiceConfig.build(app)
             media_file = RDMMediaFileRecordServiceConfig.build(app)
@@ -162,7 +167,9 @@ class InvenioRDMRecords(object):
         self.records_media_files_service = RDMRecordService(
             service_configs.record_with_media_files,
             files_service=RDMFileService(service_configs.media_file),
-            draft_files_service=RDMFileService(service_configs.media_file_draft),
+            draft_files_service=RDMFileService(
+                service_configs.media_file_draft
+            ),
             pids_service=PIDsService(service_configs.record, PIDManager),
         )
 
@@ -304,15 +311,24 @@ def init(app):
     ext = app.extensions["invenio-rdm-records"]
     sregistry.register(ext.records_service, service_id="records")
     sregistry.register(ext.records_service.files, service_id="files")
-    sregistry.register(ext.records_service.draft_files, service_id="draft-files")
-    sregistry.register(ext.records_media_files_service, service_id="record-media-files")
-    sregistry.register(ext.records_media_files_service.files, service_id="media-files")
     sregistry.register(
-        ext.records_media_files_service.draft_files, service_id="draft-media-files"
+        ext.records_service.draft_files, service_id="draft-files"
+    )
+    sregistry.register(
+        ext.records_media_files_service, service_id="record-media-files"
+    )
+    sregistry.register(
+        ext.records_media_files_service.files, service_id="media-files"
+    )
+    sregistry.register(
+        ext.records_media_files_service.draft_files,
+        service_id="draft-media-files",
     )
     sregistry.register(ext.oaipmh_server_service, service_id="oaipmh-server")
     sregistry.register(ext.iiif_service, service_id="rdm-iiif")
     # Register indexers
     iregistry = app.extensions["invenio-indexer"].registry
     iregistry.register(ext.records_service.indexer, indexer_id="records")
-    iregistry.register(ext.records_service.draft_indexer, indexer_id="records-drafts")
+    iregistry.register(
+        ext.records_service.draft_indexer, indexer_id="records-drafts"
+    )
