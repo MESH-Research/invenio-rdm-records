@@ -14,11 +14,19 @@ from flask_principal import identity_loaded
 from invenio_records_resources.resources.files import FileResource
 from invenio_records_resources.services import FileService
 
-from invenio_rdm_records.oaiserver.resources.config import OAIPMHServerResourceConfig
-from invenio_rdm_records.oaiserver.resources.resources import OAIPMHServerResource
-from invenio_rdm_records.oaiserver.services.config import OAIPMHServerServiceConfig
+from invenio_rdm_records.oaiserver.resources.config import (
+    OAIPMHServerResourceConfig,
+)
+from invenio_rdm_records.oaiserver.resources.resources import (
+    OAIPMHServerResource,
+)
+from invenio_rdm_records.oaiserver.services.config import (
+    OAIPMHServerServiceConfig,
+)
 from invenio_rdm_records.oaiserver.services.services import OAIPMHServerService
-from invenio_rdm_records.services.communities.service import RecordCommunitiesService
+from invenio_rdm_records.services.communities.service import (
+    RecordCommunitiesService,
+)
 from invenio_rdm_records.services.community_inclusion.service import (
     CommunityInclusionService,
 )
@@ -38,7 +46,10 @@ from .resources import (
     RDMRecordResource,
     RDMRecordResourceConfig,
 )
-from .resources.resources import RDMRecordCommunitiesResource, RDMRecordRequestsResource
+from .resources.resources import (
+    RDMRecordCommunitiesResource,
+    RDMRecordRequestsResource,
+)
 from .services import (
     CommunityRecordsService,
     IIIFService,
