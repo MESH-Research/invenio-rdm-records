@@ -27,9 +27,14 @@ from invenio_drafts_resources.services.records.config import (
     is_draft,
     is_record,
 )
-from invenio_drafts_resources.services.records.search_params import AllVersionsParam
+from invenio_drafts_resources.services.records.search_params import (
+    AllVersionsParam,
+)
 from invenio_indexer.api import RecordIndexer
-from invenio_records_resources.services import ConditionalLink, FileServiceConfig
+from invenio_records_resources.services import (
+    ConditionalLink,
+    FileServiceConfig,
+)
 from invenio_records_resources.services.base.config import (
     ConfiguratorMixin,
     FromConfig,
@@ -198,7 +203,9 @@ class RDMRecordCommunitiesConfig(ServiceConfig, ConfiguratorMixin):
     record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
     draft_cls = FromConfig("RDM_DRAFT_CLS", default=RDMDraft)
     permission_policy_cls = FromConfig(
-        "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
+        "RDM_PERMISSION_POLICY",
+        default=RDMRecordPermissionPolicy,
+        import_string=True,
     )
 
     schema = RecordCommunitiesSchema
@@ -220,7 +227,9 @@ class RDMRecordRequestsConfig(ServiceConfig, ConfiguratorMixin):
     request_record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
     service_id = "record-requests"
     permission_policy_cls = FromConfig(
-        "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
+        "RDM_PERMISSION_POLICY",
+        default=RDMRecordPermissionPolicy,
+        import_string=True,
     )
     result_item_cls = RequestItem
     result_list_cls = RequestList
@@ -297,7 +306,9 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
 
     # Permission policy
     permission_policy_cls = FromConfig(
-        "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
+        "RDM_PERMISSION_POLICY",
+        default=RDMRecordPermissionPolicy,
+        import_string=True,
     )
 
     # Result classes
@@ -307,7 +318,9 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
     grant_result_list_cls = GrantList
     result_list_cls = RDMRecordList
 
-    default_files_enabled = FromConfig("RDM_DEFAULT_FILES_ENABLED", default=True)
+    default_files_enabled = FromConfig(
+        "RDM_DEFAULT_FILES_ENABLED", default=True
+    )
 
     # we disable by default media files. The feature is only available via REST API
     # and they should be enabled before an upload is made i.e update the draft to
@@ -472,7 +485,9 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
                 when=archive_download_enabled,
             ),
         ),
-        "latest": RecordLink("{+api}/records/{id}/versions/latest", when=is_record),
+        "latest": RecordLink(
+            "{+api}/records/{id}/versions/latest", when=is_record
+        ),
         "latest_html": RecordLink("{+ui}/records/{id}/latest", when=is_record),
         "draft": RecordLink("{+api}/records/{id}/draft", when=is_record),
         "record": RecordLink("{+api}/records/{id}", when=is_draft),
@@ -482,7 +497,9 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
         "publish": RecordLink(
             "{+api}/records/{id}/draft/actions/publish", when=is_draft
         ),
-        "review": RecordLink("{+api}/records/{id}/draft/review", when=is_draft),
+        "review": RecordLink(
+            "{+api}/records/{id}/draft/review", when=is_draft
+        ),
         "submit-review": RecordLink(
             "{+api}/records/{id}/draft/actions/submit-review",
             when=is_draft_and_has_review,
@@ -536,7 +553,9 @@ class RDMCommunityRecordsConfig(BaseRecordServiceConfig, ConfiguratorMixin):
     record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
     community_cls = Community
     permission_policy_cls = FromConfig(
-        "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
+        "RDM_PERMISSION_POLICY",
+        default=RDMRecordPermissionPolicy,
+        import_string=True,
     )
 
     # Search configuration
@@ -651,7 +670,9 @@ class RDMFileDraftServiceConfig(FileServiceConfig, ConfiguratorMixin):
         "iiif_canvas": FileLink(
             "{+api}/iiif/draft:{id}/canvas/{+key}", when=is_iiif_compatible
         ),
-        "iiif_base": FileLink("{+api}/iiif/draft:{id}:{+key}", when=is_iiif_compatible),
+        "iiif_base": FileLink(
+            "{+api}/iiif/draft:{id}:{+key}", when=is_iiif_compatible
+        ),
         "iiif_info": FileLink(
             "{+api}/iiif/draft:{id}:{+key}/info.json", when=is_iiif_compatible
         ),
@@ -688,12 +709,18 @@ class RDMMediaFileDraftServiceConfig(FileServiceConfig, ConfiguratorMixin):
 
     file_links_item = {
         "self": FileLink("{+api}/records/{id}/draft/media-files/{key}"),
-        "content": FileLink("{+api}/records/{id}/draft/media-files/{key}/content"),
-        "commit": FileLink("{+api}/records/{id}/draft/media-files/{key}/commit"),
+        "content": FileLink(
+            "{+api}/records/{id}/draft/media-files/{key}/content"
+        ),
+        "commit": FileLink(
+            "{+api}/records/{id}/draft/media-files/{key}/commit"
+        ),
         "iiif_canvas": FileLink(
             "{+api}/iiif/draft:{id}/canvas/{+key}", when=is_iiif_compatible
         ),
-        "iiif_base": FileLink("{+api}/iiif/draft:{id}:{+key}", when=is_iiif_compatible),
+        "iiif_base": FileLink(
+            "{+api}/iiif/draft:{id}:{+key}", when=is_iiif_compatible
+        ),
         "iiif_info": FileLink(
             "{+api}/iiif/draft:{id}:{+key}/info.json", when=is_iiif_compatible
         ),
