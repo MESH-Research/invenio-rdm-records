@@ -15,11 +15,6 @@ from os.path import splitext
 
 from flask import current_app
 from invenio_communities.communities.records.api import Community
-from invenio_drafts_resources.services.records.components import (
-    DraftFilesComponent,
-    PIDComponent,
-    RelationsComponent,
-)
 from invenio_drafts_resources.services.records.config import (
     RecordServiceConfig,
     SearchDraftsOptions,
@@ -55,13 +50,6 @@ from requests import Request
 
 from ..records import RDMDraft, RDMRecord
 from . import facets
-from .components import (
-    AccessComponent,
-    CustomFieldsComponent,
-    MetadataComponent,
-    PIDsComponent,
-    ReviewComponent,
-)
 from .customizations import FromConfigPIDsProviders, FromConfigRequiredPIDs
 from .permissions import RDMRecordPermissionPolicy
 from .result_items import SecretLinkItem, SecretLinkList
@@ -69,19 +57,7 @@ from .schemas import RDMParentSchema, RDMRecordSchema
 from .schemas.community_records import CommunityRecordsSchema
 from .schemas.parent.access import SecretLink
 from .schemas.record_communities import RecordCommunitiesSchema
-
-DefaultRecordsComponents = [
-    MetadataComponent,
-    CustomFieldsComponent,
-    AccessComponent,
-    DraftFilesComponent,
-    # for the internal `pid` field
-    PIDComponent,
-    # for the `pids` field (external PIDs)
-    PIDsComponent,
-    RelationsComponent,
-    ReviewComponent,
-]
+from .components import DefaultRecordsComponents
 
 
 def is_draft_and_has_review(record, ctx):
