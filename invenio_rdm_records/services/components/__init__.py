@@ -44,6 +44,7 @@ DefaultRecordsComponents = [
 
 
 __all__ = (
+    "DefaultRecordsComponents",
     "AccessComponent",
     "ContentModerationComponent",
     "CustomFieldsComponent",
