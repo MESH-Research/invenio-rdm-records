@@ -8,27 +8,33 @@
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """Permissions for Invenio RDM Records."""
-
+from invenio_administration.generators import Administration
 from invenio_communities.generators import CommunityCurators
 from invenio_records_permissions.generators import (
     AnyUser,
     AuthenticatedUser,
     Disable,
+    IfConfig,
     SystemProcess,
 )
 from invenio_records_permissions.policies.records import RecordPermissionPolicy
+from invenio_requests.services.generators import Receiver, Status
 from invenio_requests.services.permissions import (
     PermissionPolicy as RequestPermissionPolicy,
 )
+from invenio_users_resources.services.permissions import UserManager
 
 from ..requests.access import GuestAccessRequest
 from .generators import (
     AccessGrant,
+    CommunityInclusionReviewers,
     GuestAccessRequestToken,
-    IfConfig,
+    IfCreate,
+    IfDeleted,
     IfExternalDOIRecord,
     IfFileIsLocal,
     IfNewRecord,
+    IfRecordDeleted,
     IfRequestType,
     IfRestricted,
     RecordCommunitiesAction,
@@ -66,11 +72,13 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
         AccessGrant("preview"),
         SecretLinks("preview"),
         SubmissionReviewer(),
+        UserManager,
     ]
     can_view = can_preview + [
         AccessGrant("view"),
         SecretLinks("view"),
         SubmissionReviewer(),
+        CommunityInclusionReviewers(),
         RecordCommunitiesAction("view"),
     ]
 
@@ -95,6 +103,18 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
     can_read = [
         IfRestricted("record", then_=can_view, else_=can_all),
     ]
+
+    # Used for search filtering of deleted records
+    # cannot be implemented inside can_read - otherwise permission will
+    # kick in before tombstone renders
+    can_read_deleted = [
+        IfRecordDeleted(
+            then_=[UserManager, SystemProcess()],
+            else_=can_read,
+        )
+    ]
+    can_read_deleted_files = can_read_deleted
+    can_media_read_deleted_files = can_read_deleted_files
     # Allow reading the files of a record
     can_read_files = [
         IfRestricted("files", then_=can_view, else_=can_all),
@@ -165,7 +185,7 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
     # Actions
     #
     # Allow to put a record in edit mode (create a draft from record)
-    can_edit = can_curate
+    can_edit = [IfDeleted(then_=[Disable()], else_=can_curate)]
     # Allow deleting/discarding a draft and all associated files
     can_delete_draft = can_curate
     # Allow creating a new version of an existing published record.
@@ -185,7 +205,7 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
     # Record communities
     #
     # Who can add record to a community
-    can_add_community = [RecordOwners(), SystemProcess()]
+    can_add_community = can_manage
     # Who can remove a community from a record
     can_remove_community = [
         RecordOwners(),
@@ -196,7 +216,7 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
     can_remove_record = [CommunityCurators()]
 
     #
-    # Media files
+    # Media files - draft
     #
     can_draft_media_create_files = can_review
     can_draft_media_read_files = can_review
@@ -215,17 +235,53 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
     can_draft_media_delete_files = can_review
 
     #
+    # Media files - record
+    #
+    can_media_read_files = [
+        IfRestricted("record", then_=can_view, else_=can_all),
+        ResourceAccessToken("read"),
+    ]
+    can_media_get_content_files = [
+        # note: even though this is closer to business logic than permissions,
+        # it was simpler and less coupling to implement this as permission check
+        IfFileIsLocal(then_=can_read, else_=[SystemProcess()])
+    ]
+    can_media_create_files = [Disable()]
+    can_media_set_content_files = [Disable()]
+    can_media_commit_files = [Disable()]
+    can_media_update_files = [Disable()]
+    can_media_delete_files = [Disable()]
+
+    #
+    # Record deletion workflows
+    #
+    can_delete = [Administration(), SystemProcess()]
+    can_delete_files = [SystemProcess()]
+    can_purge = [SystemProcess()]
+
+    #
+    # Record and user quota
+    #
+
+    can_manage_quota = [
+        # moderators
+        UserManager,
+        SystemProcess(),
+    ]
+    #
     # Disabled actions (these should not be used or changed)
     #
     # - Records/files are updated/deleted via drafts so we don't support
     #   using below actions.
     can_update = [Disable()]
-    can_delete = [Disable()]
     can_create_files = [Disable()]
     can_set_content_files = [Disable()]
     can_commit_files = [Disable()]
     can_update_files = [Disable()]
-    can_delete_files = [Disable()]
+
+    # Used to hide at the moment the `parent.is_verified` field. It should be set to
+    # correct permissions based on which the field will be exposed only to moderators
+    can_moderate = [Disable()]
 
 
 guest_token = IfRequestType(
@@ -240,3 +296,20 @@ class RDMRequestsPermissionPolicy(RequestPermissionPolicy):
     can_update = RequestPermissionPolicy.can_update + [guest_token]
     can_action_submit = RequestPermissionPolicy.can_action_submit + [guest_token]
     can_action_cancel = RequestPermissionPolicy.can_action_cancel + [guest_token]
+    can_create_comment = can_read
+    can_update_comment = RequestPermissionPolicy.can_update_comment + [guest_token]
+    can_delete_comment = RequestPermissionPolicy.can_delete_comment + [guest_token]
+
+    # manages GuessAccessRequest payload permissions
+    can_manage_access_options = [
+        IfCreate(
+            then_=[SystemProcess()],
+            else_=[
+                IfRequestType(
+                    GuestAccessRequest,
+                    then_=[Status(["submitted"], [Receiver()])],
+                    else_=Disable(),
+                )
+            ],
+        )
+    ]

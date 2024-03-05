@@ -354,23 +354,6 @@ def test_related_identifiers(appctx):
     assert fails_meta(
         {"related_identifiers": [{"identifier": "10.1234/test", "invalid": "doi"}]}
     )
-    # Unique
-    assert fails_meta(
-        {
-            "related_identifiers": [
-                {
-                    "identifier": "10.1234/test",
-                    "scheme": "doi",
-                    "relation_type": {"id": "cites"},
-                },
-                {
-                    "identifier": "10.1234/test",
-                    "scheme": "doi",
-                    "relation_type": {"id": "cites"},
-                },
-            ]
-        }
-    )
 
 
 def test_sizes(appctx):
@@ -595,17 +578,17 @@ def test_tombstones(appctx):
     assert validates(
         {
             "tombstone": {
-                "reason": "Spam record, removed by InvenioRDM staff.",
-                "category": "spam_manual",
+                "removal_reason": {"id": "spam"},
+                "note": "Spam record, removed by InvenioRDM staff.",
                 "removed_by": {"user": 1},
-                "timestamp": "2020-09-01T12:02:00+0000",
+                "removal_date": "2020-09-01T12:02:00+0000",
             }
         }
     )
     assert fails(
         {
             "tombstone": {
-                "reason": "Spam record, removed by InvenioRDM staff.",
+                "removal_reason": {"id": "spam"},
                 "invalid": "test",
             }
         }

@@ -127,3 +127,52 @@ def test_embargo_lift_with_error(running_app, search_clear, minimal_record):
     # Record should not be lifted since it didn't expire (until 3220)
     with pytest.raises(EmbargoNotLiftedError):
         service.lift_embargo(_id=record["id"], identity=superuser_identity)
+
+
+def test_search_sort_verified_enabled(
+    running_app,
+    minimal_record,
+    search_clear,
+    monkeypatch,
+    verified_user,
+    unverified_user,
+):
+    """Tests sort by 'is_verified' field, when enabled.
+
+    The flag "RDM_SEARCH_SORT_BY_VERIFIED" is monkeypatched (only modified for this test).
+    """
+    service = current_rdm_records.records_service
+
+    # NV : non-verified
+    nv_user = unverified_user
+    # V  : verified
+    v_user = verified_user
+
+    # Create two records for two distinct users (verified record is published first)
+    v_draft = service.create(v_user.identity, minimal_record)
+    assert v_draft
+    v_record = service.publish(id_=v_draft.id, identity=v_user.identity)
+    assert v_record
+
+    nv_draft = service.create(nv_user.identity, minimal_record)
+    assert nv_draft
+    nv_record = service.publish(id_=nv_draft.id, identity=nv_user.identity)
+    assert nv_record
+
+    # Disable sort by 'verified' and sort by 'latest': unverified record will be the first
+    monkeypatch.setitem(running_app.app.config, "RDM_SEARCH_SORT_BY_VERIFIED", False)
+    res = service.search(nv_user.identity, sort="newest")
+    assert res.total == 2
+    hits = res.to_dict()["hits"]["hits"]
+
+    expected_order = [nv_record.id, v_record.id]
+    assert expected_order == [h["id"] for h in hits]
+
+    # Enable sort by 'verified' and sort by 'latest': unverified record will be the last
+    monkeypatch.setitem(running_app.app.config, "RDM_SEARCH_SORT_BY_VERIFIED", True)
+    res = service.search(nv_user.identity, sort="newest")
+    assert res.total == 2
+    hits = res.to_dict()["hits"]["hits"]
+
+    expected_order = [v_record.id, nv_record.id]
+    assert expected_order == [h["id"] for h in hits]

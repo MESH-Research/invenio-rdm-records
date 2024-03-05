@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2019-2023 CERN.
+# Copyright (C) 2019-2024 CERN.
 # Copyright (C) 2019 Northwestern University.
 # Copyright (C) 2021-2023 Graz University of Technology.
 # Copyright (C) 2023 TU Wien.
@@ -15,8 +15,10 @@ from datetime import timedelta
 import idutils
 from invenio_i18n import lazy_gettext as _
 
+from . import tokens
 from .resources.serializers import DataCite43JSONSerializer
 from .services import facets
+from .services.config import lock_edit_published_files
 from .services.permissions import RDMRecordPermissionPolicy
 from .services.pids import providers
 
@@ -57,11 +59,10 @@ RDM_RECORDS_PERSONORG_SCHEMES = {
     "ror": {"label": _("ROR"), "validator": idutils.is_ror, "datacite": "ROR"},
 }
 
-
 RDM_RECORDS_IDENTIFIERS_SCHEMES = {
     "ark": {"label": _("ARK"), "validator": idutils.is_ark, "datacite": "ARK"},
     "arxiv": {"label": _("arXiv"), "validator": idutils.is_arxiv, "datacite": "arXiv"},
-    "bibcode": {
+    "ads": {
         "label": _("Bibcode"),
         "validator": idutils.is_ads,
         "datacite": "bibcode",
@@ -102,13 +103,11 @@ RDM_RECORDS_LOCATION_SCHEMES = {
     "geonames": {"label": _("GeoNames"), "validator": always_valid},
 }
 
-
 #
 # Record permission policy
 #
 RDM_PERMISSION_POLICY = RDMRecordPermissionPolicy
 """Override the default record permission policy."""
-
 
 #
 # Record review requests
@@ -185,6 +184,9 @@ RDM_FACETS = {
         },
     },
 }
+
+RDM_SEARCH_SORT_BY_VERIFIED = False
+"""Sort records by 'verified' first."""
 
 RDM_SORT_OPTIONS = {
     "bestmatch": dict(
@@ -336,7 +338,6 @@ The name is further used to configure the desired persistent identifiers (see
 ``RDM_PERSISTENT_IDENTIFIERS`` below)
 """
 
-
 RDM_PERSISTENT_IDENTIFIERS = {
     # DOI automatically removed if DATACITE_ENABLED is False.
     "doi": {
@@ -377,7 +378,7 @@ RDM_PARENT_PERSISTENT_IDENTIFIERS = {
     "doi": {
         "providers": ["datacite"],
         "required": True,
-        "condition": lambda record: record.pids["doi"]["provider"] == "datacite",
+        "condition": lambda rec: rec.pids.get("doi", {}).get("provider") == "datacite",
         "label": _("Concept DOI"),
         "validator": idutils.is_doi,
         "normalizer": idutils.normalize_doi,
@@ -393,22 +394,17 @@ RDM_ALLOW_EXTERNAL_DOI_VERSIONING = True
 DATACITE_ENABLED = False
 """Flag to enable/disable DOI registration."""
 
-
 DATACITE_USERNAME = ""
 """DataCite username."""
-
 
 DATACITE_PASSWORD = ""
 """DataCite password."""
 
-
 DATACITE_PREFIX = ""
 """DataCite DOI prefix."""
 
-
 DATACITE_TEST_MODE = True
 """DataCite test mode enabled."""
-
 
 DATACITE_FORMAT = "{prefix}/{id}"
 """A string used for formatting the DOI or a callable.
@@ -525,3 +521,26 @@ RDM_RESOURCE_ACCESS_TOKENS_WHITELISTED_JWT_ALGORITHMS = ["HS256", "HS384", "HS51
 
 RDM_RESOURCE_ACCESS_TOKEN_REQUEST_ARG = "resource_access_token"
 """URL argument to provide resource access token."""
+
+RDM_RESOURCE_ACCESS_TOKENS_SUBJECT_SCHEMA = tokens.resource_access.SubjectSchema
+"""Resource access token Marshmallow schema for parsing JWT subject."""
+
+RDM_LOCK_EDIT_PUBLISHED_FILES = lock_edit_published_files
+"""Lock editing already published files (enforce record versioning).
+
+   signature to implement:
+   def lock_edit_published_files(service, identity, record=None):
+"""
+
+# Feature flag to enable/disable user moderation
+RDM_USER_MODERATION_ENABLED = False
+"""Flag to enable creation of user moderation requests on specific user actions."""
+
+RDM_RECORDS_MAX_FILES_COUNT = 100
+"""Max amount of files allowed to upload in the deposit form."""
+
+RDM_RECORDS_MAX_MEDIA_FILES_COUNT = 100
+"""Max amount of media files allowed to upload in the deposit form."""
+
+RDM_DATACITE_FUNDER_IDENTIFIERS_PRIORITY = ("ror", "doi", "grid", "isni", "gnd")
+"""Priority of funder identifiers types to be used for DataCite serialization."""

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2020-2022 CERN.
+# Copyright (C) 2020-2024 CERN.
 # Copyright (C) 2020 Northwestern University.
 # Copyright (C) 2021 TU Wien.
 # Copyright (C) 2021 Graz University of Technology.
@@ -13,7 +13,8 @@
 from copy import copy
 
 from invenio_drafts_resources.services.records.components import ServiceComponent
-from invenio_records_resources.services.uow import RecordCommitOp, TaskOp
+from invenio_drafts_resources.services.records.uow import ParentRecordCommitOp
+from invenio_records_resources.services.uow import TaskOp
 
 from ..pids.tasks import register_or_update_pid
 
@@ -82,7 +83,7 @@ class PIDsComponent(ServiceComponent):
         # on a published record. Changes are handled by removing the old PID
         # and adding the new.
         changed_pids = {}
-        for scheme in draft_schemes.intersection(record_schemes):
+        for scheme in draft_schemes & record_schemes:
             record_id = record_pids[scheme]["identifier"]
             draft_id = draft_pids[scheme]["identifier"]
             if record_id != draft_id:
@@ -101,6 +102,18 @@ class PIDsComponent(ServiceComponent):
 
         # Reserve all created PIDs and store them on the record
         self.service.pids.pid_manager.reserve_all(draft, pids)
+
+        # Restore any removed required PIDs
+        removed_required_pids = (record_schemes - draft_schemes) & required_schemes
+        pids.update(
+            {
+                scheme: record_pids[scheme]
+                for scheme in removed_required_pids
+                if scheme in record_pids
+            }
+        )
+
+        # Set the resulting PIDs on the record
         record.pids = pids
 
         # Async register/update tasks after transaction commit.
@@ -125,6 +138,16 @@ class PIDsComponent(ServiceComponent):
         pids = record.get("pids", {})
         self.service.pids.pid_manager.validate(pids, record)
         draft.pids = pids
+
+    def delete_record(self, identity, data=None, record=None, uow=None):
+        """Process pids on delete record."""
+        record_pids = copy(record.get("pids", {}))
+        self.service.pids.pid_manager.discard_all(record_pids, soft_delete=True)
+
+    def restore_record(self, identity, record=None, uow=None):
+        """Restore previously invalidated pids."""
+        record_pids = copy(record.get("pids", {}))
+        self.service.pids.pid_manager.restore_all(record_pids)
 
 
 class ParentPIDsComponent(ServiceComponent):
@@ -162,10 +185,40 @@ class ParentPIDsComponent(ServiceComponent):
         record.parent.pids = pids
 
         # TODO: This should normally be done in `Service.publish`
-        self.uow.register(RecordCommitOp(record.parent))
+        self.uow.register(
+            ParentRecordCommitOp(
+                record.parent, indexer_context=dict(service=self.service)
+            )
+        )
 
         # Async register/update tasks after transaction commit.
         for scheme in pids.keys():
+            self.uow.register(
+                TaskOp(register_or_update_pid, record["id"], scheme, parent=True)
+            )
+
+    def delete_record(self, identity, data=None, record=None, uow=None):
+        """Process pids on delete record."""
+        record_cls = self.service.record_cls
+        parent_pids = copy(record.parent.get("pids", {}))
+        if record_cls.next_latest_published_record_by_parent(record.parent) is None:
+            self.service.pids.parent_pid_manager.discard_all(
+                parent_pids, soft_delete=True
+            )
+
+        # Async register/update tasks after transaction commit.
+        for scheme in parent_pids.keys():
+            self.uow.register(
+                TaskOp(register_or_update_pid, record["id"], scheme, parent=True)
+            )
+
+    def restore_record(self, identity, record=None, uow=None):
+        """Restore previously invalidated pids."""
+        parent_pids = copy(record.parent.get("pids", {}))
+        self.service.pids.parent_pid_manager.restore_all(parent_pids)
+
+        # Async register/update tasks after transaction commit.
+        for scheme in parent_pids.keys():
             self.uow.register(
                 TaskOp(register_or_update_pid, record["id"], scheme, parent=True)
             )

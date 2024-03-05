@@ -1,10 +1,6 @@
 affiliations:
   pid-type: aff
-  schemes:
-    - id: ROR
-      name: Research Organization Registry
-      uri: "https://ror.org/"
-      data-file: vocabularies/affiliations_ror.yaml
+  data-file: vocabularies/affiliations_ror.yaml
 creatorsroles:
   pid-type: crr
   data-file: vocabularies/roles.yaml
@@ -32,6 +28,9 @@ names:
 relationtypes:
   pid-type: rlt
   data-file: vocabularies/relation_types.yaml
+removalreasons:
+  pid-type: rem
+  data-file: vocabularies/removal_reasons.yaml
 # 'subjects' type needs to be created to prevent querying errors in the facets
 # but they are highly dependent on the kind of InvenioRDM instance, so no
 # defaults are provided
@@ -53,3 +52,6 @@ awards:
 code:developmentStatus:
   pid-type: ds
   data-file: vocabularies/contrib/codemeta/development_status.yaml
+code:programmingLanguages:
+  pid-type: pl
+  data-file: vocabularies/contrib/codemeta/programming_languages.yaml

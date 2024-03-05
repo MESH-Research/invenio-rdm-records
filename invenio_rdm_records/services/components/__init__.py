@@ -8,17 +8,48 @@
 
 """High-level API for working with RDM service components."""
 
+from invenio_drafts_resources.services.records.components import (
+    DraftFilesComponent,
+    DraftMediaFilesComponent,
+    PIDComponent,
+    RelationsComponent,
+)
+
 from .access import AccessComponent
 from .custom_fields import CustomFieldsComponent
 from .metadata import MetadataComponent
 from .pids import ParentPIDsComponent, PIDsComponent
+from .record_deletion import RecordDeletionComponent
 from .review import ReviewComponent
+from .verified import ContentModerationComponent
+
+# Default components - order matters!
+DefaultRecordsComponents = [
+    MetadataComponent,
+    CustomFieldsComponent,
+    AccessComponent,
+    DraftFilesComponent,
+    DraftMediaFilesComponent,
+    RecordDeletionComponent,
+    # for the internal `pid` field
+    PIDComponent,
+    # for the `pids` field (external PIDs)
+    PIDsComponent,
+    ParentPIDsComponent,
+    RelationsComponent,
+    ReviewComponent,
+    ContentModerationComponent,
+]
+
 
 __all__ = (
     "AccessComponent",
+    "ContentModerationComponent",
     "CustomFieldsComponent",
     "MetadataComponent",
     "PIDsComponent",
     "ParentPIDsComponent",
+    "RecordDeletionComponent",
     "ReviewComponent",
+    "DefaultRecordsComponents",
 )

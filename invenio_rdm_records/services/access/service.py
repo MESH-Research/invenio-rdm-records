@@ -9,26 +9,32 @@
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """RDM record access settings service."""
-
 from datetime import datetime, timedelta
 
 import arrow
-from flask import current_app, url_for
+from flask import current_app
+from flask_login import current_user
 from invenio_access.permissions import authenticated_user, system_identity
 from invenio_drafts_resources.services.records import RecordService
+from invenio_drafts_resources.services.records.uow import ParentRecordCommitOp
 from invenio_i18n import lazy_gettext as _
+from invenio_notifications.services.uow import NotificationOp
 from invenio_records_resources.services.errors import PermissionDeniedError
 from invenio_records_resources.services.records.schema import ServiceSchemaWrapper
-from invenio_records_resources.services.uow import RecordCommitOp, unit_of_work
+from invenio_records_resources.services.uow import unit_of_work
 from invenio_requests.proxies import current_requests_service
+from invenio_search.engine import dsl
 from invenio_users_resources.proxies import current_user_resources
 from marshmallow.exceptions import ValidationError
 from sqlalchemy.orm.exc import NoResultFound
 
+from invenio_rdm_records.notifications.builders import (
+    GuestAccessRequestTokenCreateNotificationBuilder,
+)
+
 from ...requests.access import AccessRequestToken, GuestAccessRequest, UserAccessRequest
-from ...requests.access.requests import EmailOp
 from ...secret_links.errors import InvalidPermissionLevelError
-from ..errors import DuplicateAccessRequestError
+from ..errors import AccessRequestExistsError
 from ..results import GrantSubjectExpandableField
 
 
@@ -70,6 +76,16 @@ class RecordAccessService(RecordService):
     def schema_grant(self):
         """Schema for secret links."""
         return ServiceSchemaWrapper(self, schema=self.config.schema_grant)
+
+    @property
+    def schema_request_access(self):
+        """Schema for secret links."""
+        return ServiceSchemaWrapper(self, schema=self.config.schema_request_access)
+
+    @property
+    def schema_access_settings(self):
+        """Schema for record parent."""
+        return ServiceSchemaWrapper(self, schema=self.config.schema_access_settings)
 
     @property
     def expandable_fields(self):
@@ -174,13 +190,7 @@ class RecordAccessService(RecordService):
                 field_name="permission",
             )
 
-        # Commit
-        uow.register(RecordCommitOp(parent))
-        if record:
-            uow.register(RecordCommitOp(record))
-
-        # Index all child records of the parent
-        self._index_related_records(record, parent, uow=uow)
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
 
         return self.link_result_item(
             self,
@@ -280,13 +290,7 @@ class RecordAccessService(RecordService):
         link.permission_level = permission or link.permission_level
         link.description = data.get("description", link.description)
 
-        # Commit
-        uow.register(RecordCommitOp(parent))
-        if record:
-            uow.register(RecordCommitOp(record))
-
-        # Index all child records of the parent
-        self._index_related_records(record, parent, uow=uow)
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
 
         return self.link_result_item(
             self,
@@ -315,13 +319,7 @@ class RecordAccessService(RecordService):
         parent.access.links.pop(link_idx)
         link.revoke()
 
-        # Commit
-        uow.register(RecordCommitOp(parent))
-        if record:
-            uow.register(RecordCommitOp(record))
-
-        # Index all child records of the parent
-        self._index_related_records(record, parent, uow=uow)
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
 
         return True
 
@@ -380,13 +378,7 @@ class RecordAccessService(RecordService):
                 _("Could not find the specified subject."), field_name="subject.id"
             )
 
-        # Commit
-        uow.register(RecordCommitOp(parent))
-        if record:
-            uow.register(RecordCommitOp(record))
-
-        # Index all child records of the parent
-        self._index_related_records(record, parent, uow=uow)
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
 
         return self.grant_result_item(
             self,
@@ -465,13 +457,7 @@ class RecordAccessService(RecordService):
 
         parent.access.grants[grant_id] = new_grant
 
-        # Commit
-        uow.register(RecordCommitOp(parent))
-        if record:
-            uow.register(RecordCommitOp(record))
-
-        # Index all child records of the parent
-        self._index_related_records(record, parent, uow=uow)
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
 
         return self.grant_result_item(
             self,
@@ -510,73 +496,90 @@ class RecordAccessService(RecordService):
         # Deletion
         parent.access.grants.pop(grant_id)
 
-        # Commit
-        uow.register(RecordCommitOp(parent))
-        if record:
-            uow.register(RecordCommitOp(record))
-
-        # Index all child records of the parent
-        self._index_related_records(record, parent, uow=uow)
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
 
         return True
+
+    def _exists(self, created_by, record_id, request_type):
+        """Return the request id if an open request already exists, else None."""
+        query_terms = [
+            dsl.Q("term", **{"topic.record": record_id}),
+            dsl.Q("term", **{"type": request_type}),
+            dsl.Q("term", **{"is_open": True}),
+        ]
+
+        # Build the query dynamically based on the keys in created_by
+        for key, value in created_by.items():
+            query_terms.append(dsl.Q("term", **{f"created_by.{key}": value}))
+
+        open_requests = current_requests_service.search(
+            system_identity,
+            extra_filter=dsl.query.Bool("must", must=query_terms),
+        )
+
+        if open_requests.total > 1:
+            current_app.logger.error(
+                f"Multiple access requests detected for: "
+                f"record_pid{record_id}, creator: {created_by}"
+            )
+
+        if open_requests.total > 0:
+            return open_requests.to_dict()["hits"]["hits"][0]
+
+    def request_access(self, identity, id_, data, expand=False):
+        """Redirect the access request to specific service method."""
+        if current_user.is_authenticated:
+            valid_current_email = (
+                data.get("email", "").lower() == current_user.email.lower()
+            )
+            if valid_current_email:
+                return self.create_user_access_request(
+                    identity, id_, data, expand=expand
+                )
+
+        return self.create_guest_access_request_token(
+            identity, id_, data, expand=expand
+        )
 
     #
     # Access requests
     #
-
     @unit_of_work()
-    def create_user_access_request(
-        self, identity, id_, message, expand=False, uow=None
-    ):
+    def create_user_access_request(self, identity, id_, data, expand=False, uow=None):
         """Create a user access request for the given record."""
         record = self.record_cls.pid.resolve(id_)
 
         # Permissions
+        # fail early if record fully restricted
         self.require_permission(identity, "read", record=record)
-        denied = False
-        try:
-            self.require_permission(identity, "read_files", record=record)
-        except PermissionDeniedError:
-            denied = True
 
-        if not denied:
-            raise PermissionDeniedError()
+        can_read_files = self.check_permission(identity, "read_files", record=record)
 
-        # Detect duplicate requests
-        req_cls = current_requests_service.record_cls
-        model_cls = req_cls.model_cls
-        requests = [
-            request
-            for request in (
-                req_cls(rm.data, model=rm)
-                for rm in model_cls.query.filter(
-                    model_cls.json["created_by"] == {"user": str(identity.id)},
-                    model_cls.json["topic"] == {"record": id_},
-                )
-                if rm.data and rm.data["type"] == UserAccessRequest.type_id
+        if can_read_files:
+            raise PermissionDeniedError(
+                "You already have access to files of this record."
             )
-            if request.is_open
-        ]
 
-        if requests:
-            raise DuplicateAccessRequestError([str(r.id) for r in requests])
+        existing_access_request = self._exists(
+            created_by={"user": str(identity.id)},
+            record_id=id_,
+            request_type=UserAccessRequest.type_id,
+        )
 
-        record = self.record_cls.pid.resolve(id_)
-        data = {
-            "payload": {
-                "permission": "view",
-                "message": message,
-            }
-        }
+        if existing_access_request:
+            raise AccessRequestExistsError(existing_access_request["id"])
+
+        data, __ = self.schema_request_access.load(
+            data, context={"identity": identity}, raise_errors=True
+        )
+
+        data = {"payload": data}
 
         # Determine the request's receiver
         receiver = None
         record_owner = record.parent.access.owner.resolve()
         if record_owner:
             receiver = record_owner
-
-        if receiver is None:
-            pass
 
         request = current_requests_service.create(
             identity,
@@ -589,21 +592,19 @@ class RecordAccessService(RecordService):
             uow=uow,
         )
 
-        # immediately submit the request, unless it has errors
-        if request.errors:
-            return request
-
-        message = {
-            "payload": {
-                "content": data["payload"].get("message") or "",
+        message = data["payload"].get("message")
+        comment = None
+        if message:
+            comment = {
+                "payload": {
+                    "content": message,
+                }
             }
-        }
-
         return current_requests_service.execute_action(
             identity,
             request.id,
             "submit",
-            data=message,
+            data=comment,
             uow=uow,
         )
 
@@ -611,55 +612,43 @@ class RecordAccessService(RecordService):
     def create_guest_access_request_token(
         self, identity, id_, data, expand=False, uow=None
     ):
-        """Create an request token that can be used to create an access request."""
-        # Permissions
-        if authenticated_user in identity.provides:
-            raise PermissionDeniedError("request_guest_access")
-
+        """Create a request token that can be used to create an access request."""
         record = self.record_cls.pid.resolve(id_)
         if current_app.config.get("MAIL_SUPPRESS_SEND", False):
+            # TODO should be handled globally, not here, maybe EmailOp?
             current_app.logger.warn(
                 "Cannot proceed with guest based access request - "
                 "email sending has been disabled!"
             )
 
+        data, __ = self.schema_request_access.load(
+            data, context={"identity": identity}, raise_errors=True
+        )
+
         access_token = AccessRequestToken.create(
             email=data["email"],
             full_name=data["full_name"],
-            message=data["message"],
+            message=data.get("message"),
             record_pid=id_,
             shelf_life=timedelta(hours=6),
+            consent=data["consent_to_share_personal_data"],
         )
 
         # Create the URL for the email verification endpoint
-        verify_url = url_for(
-            "invenio_rdm_records_ext.verify_access_request_token",
-            _external=True,
-            **{"access_request_token": access_token.token},
-        ).replace("/api/", "/")
 
+        # TODO ideally this part should be auto generated, but
+        # due to api app and ui app split, api app does not have the UI
+        # urls registered
+        verify_url = (
+            f"{current_app.config['SITE_UI_URL']}"
+            f"/access/requests/confirm"
+            f"?access_request_token={access_token.token}"
+        )
         uow.register(
-            EmailOp(
-                receiver=data["email"],
-                subject=_(
-                    "Access request for '%(record_title)s'",
-                    record_title=record.metadata["title"],
-                ),
-                html_body=_(
-                    (
-                        "Please verify your e-mail address via the following link "
-                        "in order to submit the access request: "
-                        '<a href="%(url)s">%(url)s</a>'
-                    ),
-                    url=verify_url,
-                ),
-                body=_(
-                    (
-                        "Please verify your e-mail address via the following link "
-                        "in order to submit the access request: %(url)s"
-                    ),
-                    url=verify_url,
-                ),
+            NotificationOp(
+                GuestAccessRequestTokenCreateNotificationBuilder.build(
+                    record=record, email=data["email"], verify_url=verify_url
+                )
             )
         )
 
@@ -676,37 +665,33 @@ class RecordAccessService(RecordService):
 
         access_token = AccessRequestToken.get_by_token(token)
         if access_token is None:
-            return None
+            return
 
         access_token_data = access_token.to_dict()
         record = self.record_cls.pid.resolve(access_token_data["record_pid"])
 
         # Detect duplicate requests
-        req_cls = current_requests_service.record_cls
-        model_cls = req_cls.model_cls
-        requests = [
-            request
-            for request in (
-                req_cls(rm.data, model=rm)
-                for rm in model_cls.query.filter(
-                    model_cls.json["created_by"] == {"email": access_token.email},
-                    model_cls.json["topic"] == {"record": access_token.record_pid},
-                )
-                if rm.data and rm.data["type"] == GuestAccessRequest.type_id
-            )
-            if request.is_open
-        ]
+        existing_access_request = self._exists(
+            created_by={"email": access_token.email},
+            record_id=access_token.record_pid,
+            request_type=GuestAccessRequest.type_id,
+        )
 
-        if requests:
-            raise DuplicateAccessRequestError([str(r.id) for r in requests])
-
+        if existing_access_request:
+            raise AccessRequestExistsError(existing_access_request["id"])
         data = {
             "payload": {
                 "permission": "view",
                 "email": access_token_data["email"],
                 "full_name": access_token_data["full_name"],
                 "token": access_token_data["token"],
-                "message": access_token_data.get("message") or "",
+                "message": access_token_data.get("message", ""),
+                "consent_to_share_personal_data": access_token_data.get(
+                    "consent_to_share_personal_data"
+                ),
+                "secret_link_expiration": str(
+                    record.parent.access.settings.secret_link_expiration
+                ),
             }
         }
 
@@ -714,9 +699,6 @@ class RecordAccessService(RecordService):
         record_owner = record.parent.access.owner.resolve()
         if record_owner:
             receiver = record_owner
-
-        if receiver is None:
-            pass
 
         access_token.delete()
         request = current_requests_service.create(
@@ -726,26 +708,51 @@ class RecordAccessService(RecordService):
             receiver,
             creator=data["payload"]["email"],
             topic=record,
-            expires_at=None,
+            expires_at=None,  # TODO expire request ?
             expand=expand,
             uow=uow,
         )
 
-        if request.errors:
-            return request
-
-        prefix = _(
-            "%(full_name)s (%(email)s) commented",
-            full_name=access_token_data["full_name"],
-            email=data["payload"]["email"],
-        )
-        message = data["payload"].get("message") or ""
-        comment = {"payload": {"content": f"{prefix}: {message}"}}
+        message = data["payload"].get("message")
+        comment = None
+        if message:
+            comment = {"payload": {"content": message}}
 
         return current_requests_service.execute_action(
-            system_identity,
+            identity,
             request.id,
             "submit",
             data=comment,
             uow=uow,
+        )
+
+    @unit_of_work()
+    def update_access_settings(
+        self,
+        identity,
+        id_,
+        data,
+        uow=None,
+    ):
+        """Update access settings for a record (resp. its parent)."""
+        record, parent = self.get_parent_and_record_or_draft(id_)
+
+        # Permissions
+        self.require_permission(identity, "manage", record=record)
+
+        # Validation
+        data, __ = self.schema_access_settings.load(
+            data, context=dict(identity=identity), raise_errors=True
+        )
+
+        # Update
+        setattr(parent.access, "settings", data)
+
+        uow.register(ParentRecordCommitOp(parent, indexer_context=dict(service=self)))
+
+        return self.result_item(
+            self,
+            identity,
+            record,
+            links_tpl=self.links_item_tpl,
         )

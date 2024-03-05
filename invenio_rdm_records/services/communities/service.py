@@ -6,8 +6,10 @@
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """RDM Record Communities Service."""
-
+from flask import current_app
+from invenio_access.permissions import system_identity
 from invenio_communities.proxies import current_communities
+from invenio_drafts_resources.services.records.uow import ParentRecordCommitOp
 from invenio_i18n import lazy_gettext as _
 from invenio_notifications.services.uow import NotificationOp
 from invenio_pidstore.errors import PIDDoesNotExistError
@@ -19,7 +21,6 @@ from invenio_records_resources.services import (
 from invenio_records_resources.services.errors import PermissionDeniedError
 from invenio_records_resources.services.uow import (
     IndexRefreshOp,
-    RecordCommitOp,
     RecordIndexOp,
     unit_of_work,
 )
@@ -28,12 +29,10 @@ from invenio_requests.resolvers.registry import ResolverRegistry
 from invenio_search.engine import dsl
 from sqlalchemy.orm.exc import NoResultFound
 
-from invenio_rdm_records.notifications.builders import (
-    CommunityInclusionSubmittedNotificationBuilder,
-)
-from invenio_rdm_records.proxies import current_rdm_records
-from invenio_rdm_records.requests import CommunityInclusion
-from invenio_rdm_records.services.errors import (
+from ...notifications.builders import CommunityInclusionSubmittedNotificationBuilder
+from ...proxies import current_rdm_records, current_rdm_records_service
+from ...requests import CommunityInclusion
+from ..errors import (
     CommunityAlreadyExists,
     InvalidAccessRestrictions,
     OpenRequestAlreadyExists,
@@ -53,14 +52,19 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         return ServiceSchemaWrapper(self, schema=self.config.schema)
 
     @property
+    def communities_schema(self):
+        """Returns the communities schema instance."""
+        return ServiceSchemaWrapper(self, schema=self.config.communities_schema)
+
+    @property
     def record_cls(self):
         """Factory for creating a record class."""
         return self.config.record_cls
 
-    def _exists(self, identity, community_id, record):
+    def _exists(self, community_id, record):
         """Return the request id if an open request already exists, else None."""
         results = current_requests_service.search(
-            identity,
+            system_identity,
             extra_filter=dsl.query.Bool(
                 "must",
                 must=[
@@ -71,6 +75,11 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
                 ],
             ),
         )
+        if results.total > 1:
+            current_app.logger.error(
+                f"Multiple community inclusions request detected for: "
+                f"record_pid{record.pid.pid_value}, community_id{community_id}"
+            )
         return next(results.hits)["id"] if results.total > 0 else None
 
     def _include(self, identity, community_id, comment, require_review, record, uow):
@@ -84,7 +93,8 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             raise CommunityAlreadyExists()
 
         # check if there is already an open request, to avoid duplications
-        existing_request_id = self._exists(identity, com_id, record)
+        existing_request_id = self._exists(com_id, record)
+
         if existing_request_id:
             raise OpenRequestAlreadyExists(existing_request_id)
 
@@ -209,7 +219,12 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
                     }
                 )
         if processed:
-            uow.register(RecordCommitOp(record.parent))
+            uow.register(
+                ParentRecordCommitOp(
+                    record.parent,
+                    indexer_context=dict(service=current_rdm_records_service),
+                )
+            )
             uow.register(
                 RecordIndexOp(record, indexer=self.indexer, index_refresh=True)
             )
@@ -224,7 +239,7 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         search_preference=None,
         expand=False,
         extra_filter=None,
-        **kwargs
+        **kwargs,
     ):
         """Search for record's communities."""
         record = self.record_cls.pid.resolve(id_)
@@ -241,7 +256,7 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             search_preference=search_preference,
             expand=expand,
             extra_filter=communities_filter,
-            **kwargs
+            **kwargs,
         )
 
     @staticmethod
@@ -285,7 +300,7 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         expand=False,
         by_membership=False,
         extra_filter=None,
-        **kwargs
+        **kwargs,
     ):
         """Search for communities that can be added to a record."""
         record = self.record_cls.pid.resolve(id_)
@@ -305,7 +320,7 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
                 params=params,
                 search_preference=search_preference,
                 extra_filter=communities_filter,
-                **kwargs
+                **kwargs,
             )
 
         return current_communities.service.search(
@@ -314,5 +329,29 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             search_preference=search_preference,
             expand=expand,
             extra_filter=communities_filter,
-            **kwargs
+            **kwargs,
         )
+
+    @unit_of_work()
+    def set_default(self, identity, id_, data, uow):
+        """Set default community."""
+        valid_data, _ = self.communities_schema.load(
+            data,
+            context={
+                "identity": identity,
+            },
+            raise_errors=True,
+        )
+
+        record = self.record_cls.pid.resolve(id_)
+        self.require_permission(identity, "manage", record=record)
+        record.parent.communities.default = valid_data["default"]
+
+        uow.register(
+            ParentRecordCommitOp(
+                record.parent,
+                indexer_context=dict(service=current_rdm_records_service),
+            )
+        )
+
+        return record.parent

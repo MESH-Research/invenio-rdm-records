@@ -9,15 +9,14 @@
 
 from flask import current_app
 from invenio_communities import current_communities
-from invenio_i18n import lazy_gettext as _
 from invenio_requests import current_requests_service
 
-from invenio_rdm_records.requests.community_inclusion import (
+from ...requests.community_inclusion import (
     CommunityInclusion,
     is_access_restriction_valid,
 )
-from invenio_rdm_records.requests.community_submission import CommunitySubmission
-from invenio_rdm_records.services.errors import InvalidAccessRestrictions
+from ...requests.community_submission import CommunitySubmission
+from ..errors import InvalidAccessRestrictions
 
 
 class CommunityInclusionService:
@@ -44,10 +43,6 @@ class CommunityInclusionService:
         """
         if request.type.type_id not in self.supported_types:
             raise ValueError("Invalid request type.")
-
-        # validate record and community access
-        if not is_access_restriction_valid(record, community):
-            raise InvalidAccessRestrictions()
 
         # All other preconditions can be checked by the action itself which can
         # raise appropriate exceptions.

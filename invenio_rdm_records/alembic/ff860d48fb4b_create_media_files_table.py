@@ -1,6 +1,6 @@
 #
 # This file is part of Invenio.
-# Copyright (C) 2016-2018 CERN.
+# Copyright (C) 2023-2024 CERN.
 #
 # Invenio is free software; you can redistribute it and/or modify it
 # under the terms of the MIT License; see LICENSE file for more details.
@@ -14,7 +14,7 @@ from sqlalchemy_utils import JSONType, UUIDType
 
 # revision identifiers, used by Alembic.
 revision = "ff860d48fb4b"
-down_revision = "9e0ac518b9df"
+down_revision = "cfcb8cb78708"
 branch_labels = ()
 depends_on = None
 
@@ -124,7 +124,6 @@ def upgrade():
         ["id", "key"],
         unique=True,
     )
-    op.drop_index("ix_uq_partial_files_object_is_head", table_name="files_object")
     op.add_column(
         "rdm_drafts_metadata",
         sa.Column("media_bucket_id", UUIDType(), nullable=True),
@@ -175,12 +174,6 @@ def downgrade():
         type_="foreignkey",
     )
     op.drop_column("rdm_drafts_metadata", "media_bucket_id")
-    op.create_index(
-        "ix_uq_partial_files_object_is_head",
-        "files_object",
-        ["bucket_id", "key"],
-        unique=False,
-    )
     op.drop_index(
         "uidx_rdm_records_media_files_id_key", table_name="rdm_records_media_files"
     )

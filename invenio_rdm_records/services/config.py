@@ -16,10 +16,7 @@ from os.path import splitext
 from flask import current_app
 from invenio_communities.communities.records.api import Community
 from invenio_drafts_resources.services.records.components import (
-    DraftFilesComponent,
     DraftMediaFilesComponent,
-    PIDComponent,
-    RelationsComponent,
 )
 from invenio_drafts_resources.services.records.config import (
     RecordServiceConfig,
@@ -29,6 +26,7 @@ from invenio_drafts_resources.services.records.config import (
     is_draft,
     is_record,
 )
+from invenio_drafts_resources.services.records.search_params import AllVersionsParam
 from invenio_indexer.api import RecordIndexer
 from invenio_records_resources.services import ConditionalLink, FileServiceConfig
 from invenio_records_resources.services.base.config import (
@@ -47,6 +45,11 @@ from invenio_records_resources.services.records.links import (
     RecordLink,
     pagination_links,
 )
+from invenio_records_resources.services.records.params import (
+    FacetsParam,
+    PaginationParam,
+    QueryStrParam,
+)
 from invenio_requests.services.requests import RequestItem, RequestList
 from invenio_requests.services.requests.config import RequestSearchOptions
 from requests import Request
@@ -54,14 +57,7 @@ from requests import Request
 from ..records import RDMDraft, RDMRecord
 from ..records.api import RDMDraftMediaFiles, RDMRecordMediaFiles
 from . import facets
-from .components import (
-    AccessComponent,
-    CustomFieldsComponent,
-    MetadataComponent,
-    ParentPIDsComponent,
-    PIDsComponent,
-    ReviewComponent,
-)
+from .components import DefaultRecordsComponents
 from .customizations import (
     FromConfigConditionalPIDs,
     FromConfigPIDsProviders,
@@ -71,30 +67,39 @@ from .permissions import RDMRecordPermissionPolicy
 from .result_items import GrantItem, GrantList, SecretLinkItem, SecretLinkList
 from .schemas import RDMParentSchema, RDMRecordSchema
 from .schemas.community_records import CommunityRecordsSchema
+from .schemas.parent.access import AccessSettingsSchema
 from .schemas.parent.access import Grant as GrantSchema
+from .schemas.parent.access import RequestAccessSchema
 from .schemas.parent.access import SecretLink as SecretLinkSchema
+from .schemas.parent.communities import CommunitiesSchema
+from .schemas.quota import QuotaSchema
 from .schemas.record_communities import RecordCommunitiesSchema
+from .schemas.tombstone import TombstoneSchema
+from .search_params import MyDraftsParam, PublishedRecordsParam, StatusParam
+from .sort import VerifiedRecordsSortParam
 
 
 def is_draft_and_has_review(record, ctx):
-    """Determine if submit review link should be included."""
+    """Determine if draft has doi."""
     return is_draft(record, ctx) and record.parent.review is not None
 
 
 def is_record_and_has_doi(record, ctx):
-    """Determine if submit review link should be included."""
+    """Determine if record has doi."""
     return is_record(record, ctx) and has_doi(record, ctx)
 
 
-def is_record_and_has_parent_doi(record, ctx):
-    """Determine if submit review link should be included."""
-    return is_record(record, ctx) and has_doi(record.parent, ctx)
+def is_record_or_draft_and_has_parent_doi(record, ctx):
+    """Determine if draft or record has parent doi."""
+    return (
+        is_record(record, ctx) or is_draft(record, ctx) and has_doi(record.parent, ctx)
+    )
 
 
 def has_doi(record, ctx):
     """Determine if a record has a DOI."""
     pids = record.pids or {}
-    return "doi" in pids
+    return "doi" in pids and pids["doi"].get("identifier") is not None
 
 
 def is_iiif_compatible(file_, ctx):
@@ -113,6 +118,14 @@ def is_datacite_test(record, ctx):
     return current_app.config["DATACITE_TEST_MODE"]
 
 
+def lock_edit_published_files(service, identity, record=None):
+    """Return if files once published should be locked when editing the record.
+
+    Return False to allow editing of published files or True otherwise.
+    """
+    return True
+
+
 #
 # Default search configuration
 #
@@ -125,6 +138,17 @@ class RDMSearchOptions(SearchOptions, SearchOptionsMixin):
         "access_status": facets.access_status,
     }
 
+    # Override params interpreters to avoid having duplicated SortParam.
+    params_interpreters_cls = [
+        AllVersionsParam.factory("versions.is_latest"),
+        QueryStrParam,
+        PaginationParam,
+        FacetsParam,
+        VerifiedRecordsSortParam,
+        StatusParam,
+        PublishedRecordsParam,
+    ]
+
 
 class RDMSearchDraftsOptions(SearchDraftsOptions, SearchOptionsMixin):
     """Search options for drafts search."""
@@ -136,21 +160,31 @@ class RDMSearchDraftsOptions(SearchDraftsOptions, SearchOptionsMixin):
         "is_published": facets.is_published,
     }
 
+    params_interpreters_cls = [
+        MyDraftsParam
+    ] + SearchDraftsOptions.params_interpreters_cls
+
 
 class RDMSearchVersionsOptions(SearchVersionsOptions, SearchOptionsMixin):
     """Search options for record versioning search."""
+
+    params_interpreters_cls = [
+        PublishedRecordsParam
+    ] + SearchVersionsOptions.params_interpreters_cls
 
 
 class RDMRecordCommunitiesConfig(ServiceConfig, ConfiguratorMixin):
     """Record communities service config."""
 
     service_id = "record-communities"
-    record_cls = RDMRecord
+
+    record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
     permission_policy_cls = FromConfig(
         "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
     )
 
     schema = RecordCommunitiesSchema
+    communities_schema = CommunitiesSchema
 
     indexer_cls = RecordIndexer
     indexer_queue_name = service_id
@@ -165,7 +199,7 @@ class RDMRecordCommunitiesConfig(ServiceConfig, ConfiguratorMixin):
 class RDMRecordRequestsConfig(ServiceConfig, ConfiguratorMixin):
     """Record community inclusion config."""
 
-    request_record_cls = RDMRecord
+    request_record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
     service_id = "record-requests"
     permission_policy_cls = FromConfig(
         "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
@@ -181,42 +215,6 @@ class RDMRecordRequestsConfig(ServiceConfig, ConfiguratorMixin):
     index_dumper = None
 
 
-class RDMCommunityRecordsConfig(BaseRecordServiceConfig, ConfiguratorMixin):
-    """Community records service config."""
-
-    service_id = "community-records"
-    record_cls = RDMRecord
-    community_cls = Community
-    permission_policy_cls = FromConfig(
-        "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
-    )
-
-    # Search configuration
-    search = FromConfigSearchOptions(
-        "RDM_SEARCH",
-        "RDM_SORT_OPTIONS",
-        "RDM_FACETS",
-        search_option_cls=RDMSearchOptions,
-    )
-    search_versions = FromConfigSearchOptions(
-        "RDM_SEARCH_VERSIONING",
-        "RDM_SORT_OPTIONS",
-        "RDM_FACETS",
-        search_option_cls=RDMSearchVersionsOptions,
-    )
-
-    # Service schemas
-    community_record_schema = CommunityRecordsSchema
-    schema = RDMRecordSchema
-
-    # Max n. records that can be removed at once
-    max_number_of_removals = 10
-
-    links_search_community_records = pagination_links(
-        "{+api}/communities/{id}/records{?args*}"
-    )
-
-
 #
 # Default service configuration
 #
@@ -224,14 +222,18 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
     """RDM record draft service config."""
 
     # Record and draft classes
-    record_cls = RDMRecord
-    draft_cls = RDMDraft
+    record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
+    draft_cls = FromConfig("RDM_DRAFT_CLS", default=RDMDraft)
 
     # Schemas
     schema = RDMRecordSchema
     schema_parent = RDMParentSchema
+    schema_access_settings = AccessSettingsSchema
     schema_secret_link = SecretLinkSchema
     schema_grant = GrantSchema
+    schema_request_access = RequestAccessSchema
+    schema_tombstone = TombstoneSchema
+    schema_quota = QuotaSchema
 
     # Permission policy
     permission_policy_cls = FromConfig(
@@ -244,8 +246,16 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
     grant_result_item_cls = GrantItem
     grant_result_list_cls = GrantList
 
-    # Permission policy
     default_files_enabled = FromConfig("RDM_DEFAULT_FILES_ENABLED", default=True)
+
+    # we disable by default media files. The feature is only available via REST API
+    # and they should be enabled before an upload is made i.e update the draft to
+    # set `media_files.enabled` to True
+    default_media_files_enabled = False
+
+    lock_edit_published_files = FromConfig(
+        "RDM_LOCK_EDIT_PUBLISHED_FILES", default=lock_edit_published_files
+    )
 
     # Search configuration
     search = FromConfigSearchOptions(
@@ -253,6 +263,7 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
         "RDM_SORT_OPTIONS",
         "RDM_FACETS",
         search_option_cls=RDMSearchOptions,
+        search_option_cls_key="RDM_SEARCH_OPTIONS_CLS",
     )
     search_drafts = FromConfigSearchOptions(
         "RDM_SEARCH_DRAFTS",
@@ -283,20 +294,10 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
     )
 
     # Components - order matters!
-    components = [
-        MetadataComponent,
-        CustomFieldsComponent,
-        AccessComponent,
-        DraftFilesComponent,
-        DraftMediaFilesComponent,
-        # for the internal `pid` field
-        PIDComponent,
-        # for the `pids` field (external PIDs)
-        PIDsComponent,
-        ParentPIDsComponent,
-        RelationsComponent,
-        ReviewComponent,
-    ]
+    # Service components
+    components = FromConfig(
+        "RDM_RECORDS_SERVICE_COMPONENTS", default=DefaultRecordsComponents
+    )
 
     # Links
     links_item = {
@@ -360,7 +361,7 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
         ),
         "parent_doi": Link(
             "{+ui}/doi/{+pid_doi}",
-            when=is_record_and_has_parent_doi,
+            when=is_record_or_draft_and_has_parent_doi,
             vars=lambda record, vars: vars.update(
                 {
                     f"pid_{scheme}": pid["identifier"]
@@ -399,6 +400,17 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
                 when=archive_download_enabled,
             ),
         ),
+        "archive_media": ConditionalLink(
+            cond=is_record,
+            if_=RecordLink(
+                "{+api}/records/{id}/media-files-archive",
+                when=archive_download_enabled,
+            ),
+            else_=RecordLink(
+                "{+api}/records/{id}/draft/media-files-archive",
+                when=archive_download_enabled,
+            ),
+        ),
         "latest": RecordLink("{+api}/records/{id}/versions/latest", when=is_record),
         "latest_html": RecordLink("{+ui}/records/{id}/latest", when=is_record),
         "draft": RecordLink("{+api}/records/{id}/draft", when=is_record),
@@ -416,6 +428,9 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
         ),
         "versions": RecordLink("{+api}/records/{id}/versions"),
         "access_links": RecordLink("{+api}/records/{id}/access/links"),
+        "access_users": RecordLink("{+api}/records/{id}/access/users"),
+        "access_request": RecordLink("{+api}/records/{id}/access/request"),
+        "access": RecordLink("{+api}/records/{id}/access"),
         # TODO: only include link when DOI support is enabled.
         "reserve_doi": RecordLink("{+api}/records/{id}/draft/pids/doi"),
         "communities": RecordLink("{+api}/records/{id}/communities"),
@@ -424,6 +439,45 @@ class RDMRecordServiceConfig(RecordServiceConfig, ConfiguratorMixin):
         ),
         "requests": RecordLink("{+api}/records/{id}/requests"),
     }
+
+
+class RDMCommunityRecordsConfig(BaseRecordServiceConfig, ConfiguratorMixin):
+    """Community records service config."""
+
+    service_id = "community-records"
+    record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
+    community_cls = Community
+    permission_policy_cls = FromConfig(
+        "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy, import_string=True
+    )
+
+    # Search configuration
+    search = FromConfigSearchOptions(
+        "RDM_SEARCH",
+        "RDM_SORT_OPTIONS",
+        "RDM_FACETS",
+        search_option_cls=RDMSearchOptions,
+        search_option_cls_key="RDM_SEARCH_OPTIONS_CLS",
+    )
+    search_versions = FromConfigSearchOptions(
+        "RDM_SEARCH_VERSIONING",
+        "RDM_SORT_OPTIONS",
+        "RDM_FACETS",
+        search_option_cls=RDMSearchVersionsOptions,
+    )
+
+    # Service schemas
+    community_record_schema = CommunityRecordsSchema
+    schema = RDMRecordSchema
+
+    # Max n. records that can be removed at once
+    max_number_of_removals = 10
+
+    links_search_community_records = pagination_links(
+        "{+api}/communities/{id}/records{?args*}"
+    )
+
+    links_item = RDMRecordServiceConfig.links_item
 
 
 class RDMRecordMediaFilesServiceConfig(RDMRecordServiceConfig):
@@ -441,10 +495,13 @@ class RDMRecordMediaFilesServiceConfig(RDMRecordServiceConfig):
 class RDMFileRecordServiceConfig(FileServiceConfig, ConfiguratorMixin):
     """Configuration for record files."""
 
-    record_cls = RDMRecord
+    record_cls = FromConfig("RDM_RECORD_CLS", default=RDMRecord)
+
     permission_policy_cls = FromConfig(
         "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy
     )
+
+    max_files_count = FromConfig("RDM_RECORDS_MAX_FILES_COUNT", 100)
 
     file_links_list = {
         **FileServiceConfig.file_links_list,
@@ -458,14 +515,16 @@ class RDMFileRecordServiceConfig(FileServiceConfig, ConfiguratorMixin):
         **FileServiceConfig.file_links_item,
         # FIXME: filename instead
         "iiif_canvas": FileLink(
-            "{+api}/iiif/record:{id}/canvas/{key}", when=is_iiif_compatible
+            "{+api}/iiif/record:{id}/canvas/{+key}", when=is_iiif_compatible
         ),
-        "iiif_base": FileLink("{+api}/iiif/record:{id}:{key}", when=is_iiif_compatible),
+        "iiif_base": FileLink(
+            "{+api}/iiif/record:{id}:{+key}", when=is_iiif_compatible
+        ),
         "iiif_info": FileLink(
-            "{+api}/iiif/record:{id}:{key}/info.json", when=is_iiif_compatible
+            "{+api}/iiif/record:{id}:{+key}/info.json", when=is_iiif_compatible
         ),
         "iiif_api": FileLink(
-            "{+api}/iiif/record:{id}:{key}/{region=full}"
+            "{+api}/iiif/record:{id}:{+key}/{region=full}"
             "/{size=full}/{rotation=0}/{quality=default}.{format=png}",
             when=is_iiif_compatible,
         ),
@@ -479,11 +538,14 @@ class RDMMediaFileRecordServiceConfig(FileServiceConfig, ConfiguratorMixin):
     permission_policy_cls = FromConfig(
         "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy
     )
+    permission_action_prefix = "media_"
+
+    max_files_count = FromConfig("RDM_RECORDS_MAX_MEDIA_FILES_COUNT", 100)
 
     file_links_list = {
         "self": RecordLink("{+api}/records/{id}/media-files"),
         "archive": RecordLink(
-            "{+api}/records/{id}/media-files-archive",  # TODO needed?
+            "{+api}/records/{id}/media-files-archive",
             when=archive_download_enabled,
         ),
     }
@@ -499,11 +561,14 @@ class RDMFileDraftServiceConfig(FileServiceConfig, ConfiguratorMixin):
 
     service_id = "draft-files"
 
-    record_cls = RDMDraft
+    record_cls = FromConfig("RDM_DRAFT_CLS", default=RDMDraft)
+
     permission_action_prefix = "draft_"
     permission_policy_cls = FromConfig(
         "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy
     )
+
+    max_files_count = FromConfig("RDM_RECORDS_MAX_FILES_COUNT", 100)
 
     file_links_list = {
         "self": RecordLink("{+api}/records/{id}/draft/files"),
@@ -514,19 +579,19 @@ class RDMFileDraftServiceConfig(FileServiceConfig, ConfiguratorMixin):
     }
 
     file_links_item = {
-        "self": FileLink("{+api}/records/{id}/draft/files/{key}"),
-        "content": FileLink("{+api}/records/{id}/draft/files/{key}/content"),
-        "commit": FileLink("{+api}/records/{id}/draft/files/{key}/commit"),
+        "self": FileLink("{+api}/records/{id}/draft/files/{+key}"),
+        "content": FileLink("{+api}/records/{id}/draft/files/{+key}/content"),
+        "commit": FileLink("{+api}/records/{id}/draft/files/{+key}/commit"),
         # FIXME: filename instead
         "iiif_canvas": FileLink(
-            "{+api}/iiif/draft:{id}/canvas/{key}", when=is_iiif_compatible
+            "{+api}/iiif/draft:{id}/canvas/{+key}", when=is_iiif_compatible
         ),
-        "iiif_base": FileLink("{+api}/iiif/draft:{id}:{key}", when=is_iiif_compatible),
+        "iiif_base": FileLink("{+api}/iiif/draft:{id}:{+key}", when=is_iiif_compatible),
         "iiif_info": FileLink(
-            "{+api}/iiif/draft:{id}:{key}/info.json", when=is_iiif_compatible
+            "{+api}/iiif/draft:{id}:{+key}/info.json", when=is_iiif_compatible
         ),
         "iiif_api": FileLink(
-            "{+api}/iiif/draft:{id}:{key}/{region=full}"
+            "{+api}/iiif/draft:{id}:{+key}/{region=full}"
             "/{size=full}/{rotation=0}/{quality=default}.{format=png}",
             when=is_iiif_compatible,
         ),
@@ -544,10 +609,12 @@ class RDMMediaFileDraftServiceConfig(FileServiceConfig, ConfiguratorMixin):
         "RDM_PERMISSION_POLICY", default=RDMRecordPermissionPolicy
     )
 
+    max_files_count = FromConfig("RDM_RECORDS_MAX_MEDIA_FILES_COUNT", 100)
+
     file_links_list = {
         "self": RecordLink("{+api}/records/{id}/draft/media-files"),
         "archive": RecordLink(
-            "{+api}/records/{id}/draft/media-files-archive",  # TODO needed?
+            "{+api}/records/{id}/draft/media-files-archive",
             when=archive_download_enabled,
         ),
     }

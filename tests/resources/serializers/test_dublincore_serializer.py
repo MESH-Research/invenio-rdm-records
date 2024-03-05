@@ -28,6 +28,7 @@ def updated_full_record(full_record):
 def updated_minimal_record(minimal_record):
     """Update fields (done after record create) for Dublin Core serializer."""
     minimal_record["access"]["status"] = "open"
+    minimal_record["parent"] = dict()
     for creator in minimal_record["metadata"]["creators"]:
         name = creator["person_or_org"].get("name")
         if not name:
@@ -41,17 +42,23 @@ def test_dublincorejson_serializer(running_app, updated_full_record):
     expected_data = {
         "contributors": ["Nielsen, Lars Holm"],
         "types": ["info:eu-repo/semantic/other"],
-        "relations": ["https://doi.org/10.1234/foo.bar"],
-        "descriptions": ["A description \nwith HTML tags", "Bla bla bla"],
+        "relations": [
+            "https://doi.org/10.1234/foo.bar",
+            "https://doi.org/10.1234/inveniordm.1234.parent",
+        ],
+        "descriptions": [
+            "&lt;h1&gt;A description&lt;/h1&gt; &lt;p&gt;with HTML tags&lt;/p&gt;",
+            "Bla bla bla",
+        ],
         "publishers": ["InvenioRDM"],
         "languages": ["dan", "eng"],
         "locations": [
             "name=test location place; description=test location description; lat=-32.94682; lon=-60.63932"
         ],
         "identifiers": [
-            "https://doi.org/10.5281/inveniordm.1234",
+            "https://doi.org/10.1234/inveniordm.1234",
             "oai:vvv.com:abcde-fghij",
-            "bibcode:1924MNRAS..84..308E",
+            "https://ui.adsabs.harvard.edu/#abs/1924MNRAS..84..308E",
         ],
         "formats": ["application/pdf"],
         "titles": ["InvenioRDM"],
@@ -105,12 +112,12 @@ def test_dublincorexml_serializer(running_app, updated_full_record):
         "<dc:creator>Nielsen, Lars Holm</dc:creator>",
         "<dc:date>2018/2020-09</dc:date>",
         "<dc:date>info:eu-repo/date/embargoEnd/2131-01-01</dc:date>",
-        "<dc:description>A description \nwith HTML tags</dc:description>",
+        "<dc:description>&amp;lt;h1&amp;gt;A description&amp;lt;/h1&amp;gt; &amp;lt;p&amp;gt;with HTML tags&amp;lt;/p&amp;gt;</dc:description>",
         "<dc:description>Bla bla bla</dc:description>",
         "<dc:format>application/pdf</dc:format>",
-        "<dc:identifier>https://doi.org/10.5281/inveniordm.1234</dc:identifier>",
+        "<dc:identifier>https://doi.org/10.1234/inveniordm.1234</dc:identifier>",
         "<dc:identifier>oai:vvv.com:abcde-fghij</dc:identifier>",
-        "<dc:identifier>bibcode:1924MNRAS..84..308E</dc:identifier>",
+        "<dc:identifier>https://ui.adsabs.harvard.edu/#abs/1924MNRAS..84..308E</dc:identifier>",
         "<dc:language>dan</dc:language>",
         "<dc:language>eng</dc:language>",
         "<dc:publisher>InvenioRDM</dc:publisher>",
@@ -126,7 +133,6 @@ def test_dublincorexml_serializer(running_app, updated_full_record):
 
     serializer = DublinCoreXMLSerializer()
     serialized_record = serializer.serialize_object(updated_full_record)
-
     for ed in expected_data:
         assert ed in serialized_record
 
@@ -157,11 +163,11 @@ def test_dublincorexml_serializer_list(
         "<dc:creator>Nielsen, Lars Holm</dc:creator>",
         "<dc:date>2018/2020-09</dc:date>",
         "<dc:date>info:eu-repo/date/embargoEnd/2131-01-01</dc:date>",
-        "<dc:description>A description \nwith HTML tags</dc:description>",
+        "<dc:description>&amp;lt;h1&amp;gt;A description&amp;lt;/h1&amp;gt; &amp;lt;p&amp;gt;with HTML tags&amp;lt;/p&amp;gt;</dc:description>",
         "<dc:description>Bla bla bla</dc:description>",
         "<dc:format>application/pdf</dc:format>",
-        "<dc:identifier>https://doi.org/10.5281/inveniordm.1234</dc:identifier>",
-        "<dc:identifier>bibcode:1924MNRAS..84..308E</dc:identifier>",
+        "<dc:identifier>https://doi.org/10.1234/inveniordm.1234</dc:identifier>",
+        "<dc:identifier>https://ui.adsabs.harvard.edu/#abs/1924MNRAS..84..308E</dc:identifier>",
         "<dc:language>dan</dc:language>",
         "<dc:language>eng</dc:language>",
         "<dc:publisher>InvenioRDM</dc:publisher>",

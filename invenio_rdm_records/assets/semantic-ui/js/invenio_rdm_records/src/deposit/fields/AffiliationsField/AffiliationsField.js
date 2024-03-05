@@ -19,9 +19,9 @@ export class AffiliationsField extends Component {
       text: affiliation.acronym
         ? `${affiliation.name} (${affiliation.acronym})`
         : affiliation.name,
-      value: affiliation.name,
-      key: affiliation.name,
-      ...(affiliation.id ? { id: affiliation.id } : {}),
+      value: affiliation.id || affiliation.name,
+      key: affiliation.id,
+      id: affiliation.id,
       name: affiliation.name,
     }));
 
@@ -39,7 +39,7 @@ export class AffiliationsField extends Component {
               }}
               initialSuggestions={getIn(values, fieldPath, [])}
               serializeSuggestions={this.serializeAffiliations}
-              placeholder={i18next.t("Search or create affiliation'")}
+              placeholder={i18next.t("Search or create affiliation")}
               label={
                 <FieldLabel
                   htmlFor={`${fieldPath}.name`}
@@ -58,8 +58,12 @@ export class AffiliationsField extends Component {
                   selectedSuggestions
                 );
               }}
-              value={getIn(values, fieldPath, []).map((val) => val.name)}
+              value={getIn(values, fieldPath, []).map(
+                (val) => val.id || val.text || val.name
+              )}
               ref={selectRef}
+              // Disable UI-side filtering of search results
+              search={(options) => options}
             />
           );
         }}

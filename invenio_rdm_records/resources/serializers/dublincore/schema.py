@@ -9,8 +9,11 @@
 
 import bleach
 import idutils
+from flask import current_app
 from flask_resources.serializers import BaseSerializerSchema
 from invenio_access.permissions import system_identity
+from invenio_communities import current_communities
+from invenio_communities.communities.services.service import get_cached_community_slug
 from invenio_vocabularies.proxies import current_service as vocabulary_service
 from marshmallow import fields, missing
 
@@ -99,6 +102,20 @@ class DublinCoreSchema(BaseSerializerSchema, CommonFieldsMixin):
         for a in obj["metadata"].get("related_identifiers", []):
             rels.append(self._transform_identifier(a["identifier"], a["scheme"]))
 
+        # Communities
+        communities = obj["parent"].get("communities", {}).get("ids", [])
+        service_id = current_communities.service.id
+        for community_id in communities:
+            slug = get_cached_community_slug(community_id, service_id)
+            url = f"{current_app.config['SITE_UI_URL']}/communities/{slug}"
+            rels.append(self._transform_identifier(url, "url"))
+
+        # Parent doi
+        parent_pids = obj["parent"].get("pids", {})
+        for key, value in parent_pids.items():
+            if key == "doi":
+                rels.append(self._transform_identifier(value["identifier"], key))
+
         return rels or missing
 
     def get_rights(self, obj):
@@ -166,8 +183,6 @@ class DublinCoreSchema(BaseSerializerSchema, CommonFieldsMixin):
         descriptions = [
             bleach.clean(
                 desc,
-                strip=True,
-                strip_comments=True,
                 tags=[],
                 attributes=[],
             )

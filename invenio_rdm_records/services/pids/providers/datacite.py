@@ -12,15 +12,20 @@
 import json
 import warnings
 from collections import ChainMap
+from json import JSONDecodeError
 
 from datacite import DataCiteRESTClient
-from datacite.errors import DataCiteError
+from datacite.errors import (
+    DataCiteError,
+    DataCiteNoContentError,
+    DataCiteNotFoundError,
+    DataCiteServerError,
+)
 from flask import current_app
 from invenio_i18n import lazy_gettext as _
 from invenio_pidstore.models import PIDStatus
 
-from invenio_rdm_records.resources.serializers import DataCite43JSONSerializer
-
+from ....resources.serializers import DataCite43JSONSerializer
 from .base import PIDProvider
 
 
@@ -109,16 +114,28 @@ class DataCitePIDProvider(PIDProvider):
         self.serializer = serializer or DataCite43JSONSerializer()
 
     @staticmethod
-    def _log_errors(errors):
+    def _log_errors(exception):
         """Log errors from DataCiteError class."""
-        # DataCiteError is a tuple with the errors on the first
-        errors = json.loads(errors.args[0])["errors"]
-        for error in errors:
-            field = error.get("source", None)
-            reason = error["title"]
-            current_app.logger.warning(
-                f"Error in {field if field else 'Missing field'}: {reason}"
-            )
+        # DataCiteError will have the response msg as first arg
+        ex_txt = exception.args[0] or ""
+        if isinstance(exception, DataCiteNoContentError):
+            current_app.logger.error(f"No content error: {ex_txt}")
+        elif isinstance(exception, DataCiteServerError):
+            current_app.logger.error(f"DataCite internal server error: {ex_txt}")
+        else:
+            # Client error 4xx status code
+            try:
+                ex_json = json.loads(ex_txt)
+            except JSONDecodeError:
+                current_app.logger.error(f"Unknown error: {ex_txt}")
+                return
+
+            # the `errors` field is only available when a 4xx error happened (not 500)
+            for error in ex_json.get("errors", []):
+                reason = error["title"]
+                field = error.get("source")  # set when missing/wrong required field
+                error_prefix = f"Error in `{field}`: " if field else "Error: "
+                current_app.logger.error(f"{error_prefix}{reason}")
 
     def generate_id(self, record, **kwargs):
         """Generate a unique DOI."""
@@ -147,7 +164,7 @@ class DataCitePIDProvider(PIDProvider):
             return True
         except DataCiteError as e:
             current_app.logger.warning(
-                "DataCite provider error when " f"registering DOI for {pid.pid_value}"
+                f"DataCite provider error when registering DOI for {pid.pid_value}"
             )
             self._log_errors(e)
 
@@ -167,7 +184,7 @@ class DataCitePIDProvider(PIDProvider):
             self.client.api.update_doi(metadata=doc, doi=pid.pid_value, url=url)
         except DataCiteError as e:
             current_app.logger.warning(
-                "DataCite provider error when " f"updating DOI for {pid.pid_value}"
+                f"DataCite provider error when updating DOI for {pid.pid_value}"
             )
             self._log_errors(e)
 
@@ -177,6 +194,14 @@ class DataCitePIDProvider(PIDProvider):
             return pid.sync_status(PIDStatus.REGISTERED)
 
         return True
+
+    def restore(self, pid, **kwargs):
+        """Restore previously deactivated DOI."""
+        try:
+            self.client.api.show_doi(pid.pid_value)
+        except DataCiteNotFoundError as e:
+            if not current_app.config["DATACITE_TEST_MODE"]:
+                raise e
 
     def delete(self, pid, **kwargs):
         """Delete/unregister a registered DOI.
@@ -192,7 +217,7 @@ class DataCitePIDProvider(PIDProvider):
                 self.client.api.hide_doi(pid.pid_value)
         except DataCiteError as e:
             current_app.logger.warning(
-                "DataCite provider error when deleting " f"DOI for {pid.pid_value}"
+                f"DataCite provider error when deleting DOI for {pid.pid_value}"
             )
             self._log_errors(e)
 

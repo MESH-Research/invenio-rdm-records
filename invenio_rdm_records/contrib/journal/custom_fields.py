@@ -34,7 +34,7 @@ class JournalCF(BaseCF):
                 "issn": SanitizedUnicode(
                     validate=is_issn,
                     error_messages={
-                        "validator_failed": _("Please provide a valid ISSN.")
+                        "validator_failed": [_("Please provide a valid ISSN.")]
                     },
                 ),
             }
@@ -60,7 +60,7 @@ class JournalCF(BaseCF):
 
 JOURNAL_NAMESPACE = {
     # Journal
-    "journal": "",
+    "journal": None,
 }
 
 

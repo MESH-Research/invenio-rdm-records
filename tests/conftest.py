@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2019-2022 CERN.
+# Copyright (C) 2019-2024 CERN.
 # Copyright (C) 2019-2022 Northwestern University.
 # Copyright (C) 2021 TU Wien.
-# Copyright (C) 2022 Graz University of Technology.
+# Copyright (C) 2022-2023 Graz University of Technology.
 #
 # Invenio-RDM-Records is free software; you can redistribute it and/or modify
 # it under the terms of the MIT License; see LICENSE file for more details.
@@ -13,6 +13,7 @@
 See https://pytest-invenio.readthedocs.io/ for documentation on which test
 fixtures are available.
 """
+from invenio_rdm_records.services.permissions import RDMRequestsPermissionPolicy
 
 # Monkey patch Werkzeug 2.1
 # Flask-Login uses the safe_str_cmp method which has been removed in Werkzeug
@@ -35,14 +36,15 @@ except AttributeError:
 from collections import namedtuple
 from copy import deepcopy
 from datetime import datetime
+from io import BytesIO
 from unittest import mock
 
 import arrow
 import pytest
 from dateutil import tz
 from flask import g
-from flask_principal import Identity, Need, UserNeed
-from flask_security import login_user, logout_user
+from flask_principal import Identity, Need, RoleNeed, UserNeed
+from flask_security import login_user
 from flask_security.utils import hash_password
 from invenio_access.models import ActionRoles
 from invenio_access.permissions import superuser_access, system_identity
@@ -53,13 +55,24 @@ from invenio_app.factory import create_app as _create_app
 from invenio_cache import current_cache
 from invenio_communities import current_communities
 from invenio_communities.communities.records.api import Community
+from invenio_communities.notifications.builders import (
+    CommunityInvitationSubmittedNotificationBuilder,
+)
 from invenio_notifications.backends import EmailNotificationBackend
+from invenio_notifications.proxies import current_notifications_manager
 from invenio_notifications.services.builders import NotificationBuilder
 from invenio_oauth2server.models import Client
 from invenio_pidstore.errors import PIDDoesNotExistError
 from invenio_records_resources.proxies import current_service_registry
 from invenio_records_resources.references.entity_resolvers import ServiceResultResolver
 from invenio_records_resources.services.custom_fields import TextCF
+from invenio_requests.notifications.builders import (
+    CommentRequestEventCreateNotificationBuilder,
+)
+from invenio_requests.proxies import current_user_moderation_service as mod_service
+from invenio_users_resources.permissions import user_management_action
+from invenio_users_resources.proxies import current_users_service
+from invenio_users_resources.records.api import UserAggregate
 from invenio_users_resources.services.schemas import (
     NotificationPreferences,
     UserPreferencesSchema,
@@ -75,11 +88,23 @@ from marshmallow import fields
 
 from invenio_rdm_records import config
 from invenio_rdm_records.notifications.builders import (
+    CommunityInclusionAcceptNotificationBuilder,
+    CommunityInclusionCancelNotificationBuilder,
+    CommunityInclusionDeclineNotificationBuilder,
+    CommunityInclusionExpireNotificationBuilder,
     CommunityInclusionSubmittedNotificationBuilder,
+    GuestAccessRequestAcceptNotificationBuilder,
+    GuestAccessRequestSubmitNotificationBuilder,
+    GuestAccessRequestTokenCreateNotificationBuilder,
+    UserAccessRequestAcceptNotificationBuilder,
+    UserAccessRequestSubmitNotificationBuilder,
 )
 from invenio_rdm_records.proxies import current_rdm_records_service
 from invenio_rdm_records.records.api import RDMDraft, RDMParent, RDMRecord
-from invenio_rdm_records.requests.entity_resolvers import RDMRecordServiceResultResolver
+from invenio_rdm_records.requests.entity_resolvers import (
+    EmailResolver,
+    RDMRecordServiceResultResolver,
+)
 from invenio_rdm_records.resources.serializers import DataCite43JSONSerializer
 from invenio_rdm_records.services.communities.components import (
     CommunityServiceComponents,
@@ -87,129 +112,6 @@ from invenio_rdm_records.services.communities.components import (
 from invenio_rdm_records.services.pids import providers
 
 from .fake_datacite_client import FakeDataCiteClient
-
-
-#
-# User fixture helper - move to pytest-invenio
-#
-#
-# Helper
-#
-class UserFixture_:
-    """A user fixture for easy test user creation."""
-
-    def __init__(self, email=None, password=None, active=True):
-        """Constructor."""
-        self._email = email
-        self._active = active
-        self._password = password
-        self._identity = None
-        self._user = None
-        self._client = None
-
-    #
-    # Creation
-    #
-    def create(self, app, db):
-        """Create the user."""
-        with db.session.begin_nested():
-            datastore = app.extensions["security"].datastore
-            user = datastore.create_user(
-                email=self.email,
-                password=hash_password(self.password),
-                active=self._active,
-            )
-        db.session.commit()
-        self._user = user
-        return self
-
-    #
-    # Properties
-    #
-    @property
-    def user(self):
-        """Get the user."""
-        return self._user
-
-    @property
-    def id(self):
-        """Get the user id as a string."""
-        return str(self._user.id)
-
-    @property
-    def email(self):
-        """Get the user."""
-        return self._email
-
-    @property
-    def password(self):
-        """Get the user."""
-        return self._password
-
-    #
-    # App context helpers
-    #
-    @property
-    def identity(self):
-        """Create identity for the user."""
-        if self._identity is None:
-            # Simulate a full login
-            assert login_user(self.user)
-            self._identity = deepcopy(g.identity)
-            # Clean up - we just want the identity object.
-            logout_user()
-        return self._identity
-
-    @identity.deleter
-    def identity(self):
-        """Delete the user."""
-        self._identity = None
-
-    def app_login(self):
-        """Create identity for the user."""
-        assert login_user(self.user)
-
-    def app_logout(self):
-        """Create identity for the user."""
-        assert logout_user()
-
-    #
-    # Test client helpers
-    #
-    def login(self, client, logout_first=False):
-        """Login the given client."""
-        return self._login(client, "/", logout_first)
-
-    def api_login(self, client, logout_first=False):
-        """Login the given client."""
-        return self._login(client, "/api/", logout_first)
-
-    def logout(self, client):
-        """Logout the given client."""
-        return self._logout(client, "/")
-
-    def api_logout(self, client):
-        """Logout the given client."""
-        return self._logout(client, "/api/")
-
-    def _login(self, client, base_path, logout):
-        """Login the given client."""
-        if logout:
-            self._logout(client, base_path)
-        res = client.post(
-            f"{base_path}login",
-            data=dict(email=self.email, password=self.password),
-            environ_base={"REMOTE_ADDR": "127.0.0.1"},
-            follow_redirects=True,
-        )
-        assert res.status_code == 200
-        return client
-
-    def _logout(self, client, base_path):
-        """Logout the client."""
-        res = client.get(f"{base_path}logout")
-        assert res.status_code < 400
-        return client
 
 
 class UserPreferencesNotificationsSchema(UserPreferencesSchema):
@@ -234,12 +136,6 @@ class DummyNotificationBuilder(NotificationBuilder):
     def build(cls, **kwargs):
         """Build notification based on type and additional context."""
         return {}
-
-
-@pytest.fixture(scope="session")
-def UserFixture():
-    """Class to create user fixtures from."""
-    return UserFixture_
 
 
 @pytest.fixture(scope="module")
@@ -277,48 +173,77 @@ def app_config(app_config, mock_datacite_client):
         "PIDSTORE_RECID_FIELD",
         "RECORDS_PERMISSIONS_RECORD_POLICY",
         "RECORDS_REST_ENDPOINTS",
+        "REQUESTS_PERMISSION_POLICY",
     ]
 
     for config_key in supported_configurations:
         app_config[config_key] = getattr(config, config_key, None)
 
-    app_config[
-        "RECORDS_REFRESOLVER_CLS"
-    ] = "invenio_records.resolver.InvenioRefResolver"
-    app_config[
-        "RECORDS_REFRESOLVER_STORE"
-    ] = "invenio_jsonschemas.proxies.current_refresolver_store"
+    app_config["RECORDS_REFRESOLVER_CLS"] = (
+        "invenio_records.resolver.InvenioRefResolver"
+    )
+    app_config["RECORDS_REFRESOLVER_STORE"] = (
+        "invenio_jsonschemas.proxies.current_refresolver_store"
+    )
 
     # OAI Server
-    app_config["OAISERVER_ID_PREFIX"] = "oai:inveniosoftware.org:recid/"
+    app_config["OAISERVER_REPOSITORY_NAME"] = "InvenioRDM"
+    app_config["OAISERVER_ID_PREFIX"] = "inveniordm"
     app_config["OAISERVER_RECORD_INDEX"] = "rdmrecords-records"
+    app_config["OAISERVER_SEARCH_CLS"] = "invenio_rdm_records.oai:OAIRecordSearch"
+    app_config["OAISERVER_ID_FETCHER"] = "invenio_rdm_records.oai:oaiid_fetcher"
+    app_config["OAISERVER_LAST_UPDATE_KEY"] = "updated"
+    app_config["OAISERVER_CREATED_KEY"] = "created"
+    app_config["OAISERVER_RECORD_CLS"] = "invenio_rdm_records.records.api:RDMRecord"
+    app_config["OAISERVER_RECORD_SETS_FETCHER"] = (
+        "invenio_oaiserver.percolator:find_sets_for_record"
+    )
+    app_config["OAISERVER_GETRECORD_FETCHER"] = (
+        "invenio_rdm_records.oai:getrecord_fetcher"
+    )
     app_config["OAISERVER_METADATA_FORMATS"] = {
+        "marcxml": {
+            "serializer": "invenio_rdm_records.oai:marcxml_etree",
+            "schema": "https://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd",
+            "namespace": "https://www.loc.gov/standards/marcxml/",
+        },
         "oai_dc": {
             "serializer": "invenio_rdm_records.oai:dublincore_etree",
             "schema": "http://www.openarchives.org/OAI/2.0/oai_dc.xsd",
             "namespace": "http://www.openarchives.org/OAI/2.0/oai_dc/",
         },
+        "dcat": {
+            "serializer": "invenio_rdm_records.oai:dcat_etree",
+            "schema": "http://schema.datacite.org/meta/kernel-4/metadata.xsd",
+            "namespace": "https://www.w3.org/ns/dcat",
+        },
+        "marc21": {
+            "serializer": "invenio_rdm_records.oai:marcxml_etree",
+            "schema": "https://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd",
+            "namespace": "https://www.loc.gov/standards/marcxml/",
+        },
         "datacite": {
             "serializer": "invenio_rdm_records.oai:datacite_etree",
-            "schema": "http://schema.datacite.orgmeta/nonexistant/nonexistant.xsd",  # noqa
-            "namespace": "http://datacite.org/schema/nonexistant",
+            "schema": "http://schema.datacite.org/meta/kernel-4.3/metadata.xsd",
+            "namespace": "http://datacite.org/schema/kernel-4",
         },
         "oai_datacite": {
             "serializer": "invenio_rdm_records.oai:oai_datacite_etree",
             "schema": "http://schema.datacite.org/oai/oai-1.1/oai.xsd",
             "namespace": "http://schema.datacite.org/oai/oai-1.1/",
         },
-        "oai_marcxml": {
-            "serializer": "invenio_rdm_records.oai:oai_marcxml_etree",
-            "schema": "https://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd",
-            "namespace": "https://www.loc.gov/standards/marcxml/",
+        "datacite4": {
+            "serializer": "invenio_rdm_records.oai:datacite_etree",
+            "schema": "http://schema.datacite.org/meta/kernel-4.3/metadata.xsd",
+            "namespace": "http://datacite.org/schema/kernel-4",
         },
-        "oai_dcat": {
-            "serializer": "invenio_rdm_records.oai:oai_dcat_etree",
-            "schema": "http://schema.datacite.org/meta/kernel-4/metadata.xsd",
-            "namespace": "https://www.w3.org/ns/dcat",
+        "oai_datacite4": {
+            "serializer": ("invenio_rdm_records.oai:oai_datacite_etree"),
+            "schema": "http://schema.datacite.org/oai/oai-1.1/oai.xsd",
+            "namespace": "http://schema.datacite.org/oai/oai-1.1/",
         },
     }
+
     app_config["INDEXER_DEFAULT_INDEX"] = "rdmrecords-records-record-v6.0.0"
     # Variable not used. We set it to silent warnings
     app_config["JSONSCHEMAS_HOST"] = "not-used"
@@ -395,11 +320,23 @@ def app_config(app_config, mock_datacite_client):
 
     # Specifying dummy builders to avoid raising errors for most tests. Extend as needed.
     app_config["NOTIFICATIONS_BUILDERS"] = {
+        CommentRequestEventCreateNotificationBuilder.type: DummyNotificationBuilder,
+        CommunityInclusionAcceptNotificationBuilder.type: DummyNotificationBuilder,
+        CommunityInclusionCancelNotificationBuilder.type: DummyNotificationBuilder,
+        CommunityInclusionDeclineNotificationBuilder.type: DummyNotificationBuilder,
+        CommunityInclusionExpireNotificationBuilder.type: DummyNotificationBuilder,
         CommunityInclusionSubmittedNotificationBuilder.type: DummyNotificationBuilder,
+        CommunityInvitationSubmittedNotificationBuilder.type: DummyNotificationBuilder,
+        GuestAccessRequestTokenCreateNotificationBuilder.type: GuestAccessRequestTokenCreateNotificationBuilder,
+        GuestAccessRequestAcceptNotificationBuilder.type: GuestAccessRequestAcceptNotificationBuilder,
+        GuestAccessRequestSubmitNotificationBuilder.type: GuestAccessRequestSubmitNotificationBuilder,
+        UserAccessRequestAcceptNotificationBuilder.type: UserAccessRequestAcceptNotificationBuilder,
+        UserAccessRequestSubmitNotificationBuilder.type: UserAccessRequestSubmitNotificationBuilder,
     }
 
     # Specifying default resolvers. Will only be used in specific test cases.
     app_config["NOTIFICATIONS_ENTITY_RESOLVERS"] = [
+        EmailResolver(),
         RDMRecordServiceResultResolver(),
         ServiceResultResolver(service_id="users", type_key="user"),
         ServiceResultResolver(service_id="communities", type_key="community"),
@@ -408,12 +345,20 @@ def app_config(app_config, mock_datacite_client):
     ]
 
     # Extending preferences schemas, to include notification preferences. Should not matter for most test cases
-    app_config[
-        "ACCOUNTS_USER_PREFERENCES_SCHEMA"
-    ] = UserPreferencesNotificationsSchema()
+    app_config["ACCOUNTS_USER_PREFERENCES_SCHEMA"] = (
+        UserPreferencesNotificationsSchema()
+    )
     app_config["USERS_RESOURCES_SERVICE_SCHEMA"] = NotificationsUserSchema
 
     app_config["RDM_RESOURCE_ACCESS_TOKENS_ENABLED"] = True
+
+    # Disable the automatic creation of moderation requests after publishing a record.
+    # When testing unverified users, there is a "unverified_user" fixture for that purpose.
+    app_config["ACCOUNTS_DEFAULT_USERS_VERIFIED"] = True
+    app_config["RDM_USER_MODERATION_ENABLED"] = False
+    app_config["REQUESTS_PERMISSION_POLICY"] = RDMRequestsPermissionPolicy
+
+    app_config["COMMUNITIES_OAI_SETS_PREFIX"] = "community-"
     return app_config
 
 
@@ -467,11 +412,14 @@ def full_record(users):
     return {
         "pids": {
             "doi": {
-                "identifier": "10.5281/inveniordm.1234",
+                "identifier": "10.1234/inveniordm.1234",
                 "provider": "datacite",
                 "client": "inveniordm",
             },
-            "oai": {"identifier": "oai:vvv.com:abcde-fghij", "provider": "oai"},
+            "oai": {
+                "identifier": "oai:vvv.com:abcde-fghij",
+                "provider": "oai",
+            },
         },
         "uuid": "445aaacd-9de1-41ab-af52-25ab6cb93df7",
         "version_id": "1",
@@ -487,7 +435,10 @@ def full_record(users):
                         "given_name": "Lars Holm",
                         "family_name": "Nielsen",
                         "identifiers": [
-                            {"scheme": "orcid", "identifier": "0000-0001-8135-3489"}
+                            {
+                                "scheme": "orcid",
+                                "identifier": "0000-0001-8135-3489",
+                            }
                         ],
                     },
                     "affiliations": [{"id": "cern"}, {"name": "free-text"}],
@@ -515,7 +466,10 @@ def full_record(users):
                         "given_name": "Lars Holm",
                         "family_name": "Nielsen",
                         "identifiers": [
-                            {"scheme": "orcid", "identifier": "0000-0001-8135-3489"}
+                            {
+                                "scheme": "orcid",
+                                "identifier": "0000-0001-8135-3489",
+                            }
                         ],
                     },
                     "role": {"id": "other"},
@@ -523,10 +477,14 @@ def full_record(users):
                 }
             ],
             "dates": [
-                {"date": "1939/1945", "type": {"id": "other"}, "description": "A date"}
+                {
+                    "date": "1939/1945",
+                    "type": {"id": "other"},
+                    "description": "A date",
+                }
             ],
             "languages": [{"id": "dan"}, {"id": "eng"}],
-            "identifiers": [{"identifier": "1924MNRAS..84..308E", "scheme": "bibcode"}],
+            "identifiers": [{"identifier": "1924MNRAS..84..308E", "scheme": "ads"}],
             "related_identifiers": [
                 {
                     "identifier": "10.1234/foo.bar",
@@ -633,9 +591,10 @@ def full_record(users):
 def enhanced_full_record(users):
     """Full record data as dict coming from the external world."""
     return {
+        "id": "w502q-xzh22",
         "pids": {
             "doi": {
-                "identifier": "10.5281/inveniordm.1234",
+                "identifier": "10.1234/inveniordm.1234",
                 "provider": "datacite",
                 "client": "inveniordm",
             },
@@ -658,7 +617,10 @@ def enhanced_full_record(users):
                         "given_name": "Lars Holm",
                         "family_name": "Nielsen",
                         "identifiers": [
-                            {"scheme": "orcid", "identifier": "0000-0001-8135-3489"}
+                            {
+                                "scheme": "orcid",
+                                "identifier": "0000-0001-8135-3489",
+                            }
                         ],
                     },
                     "affiliations": [{"id": "cern"}, {"name": "free-text"}],
@@ -709,7 +671,10 @@ def enhanced_full_record(users):
                         "given_name": "Lars Holm",
                         "family_name": "Nielsen",
                         "identifiers": [
-                            {"scheme": "orcid", "identifier": "0000-0001-8135-3489"}
+                            {
+                                "scheme": "orcid",
+                                "identifier": "0000-0001-8135-3489",
+                            }
                         ],
                     },
                     "role": {
@@ -764,7 +729,7 @@ def enhanced_full_record(users):
                     },
                 },
             ],
-            "identifiers": [{"identifier": "1924MNRAS..84..308E", "scheme": "bibcode"}],
+            "identifiers": [{"identifier": "1924MNRAS..84..308E", "scheme": "ads"}],
             "related_identifiers": [
                 {
                     "identifier": "10.1234/foo.bar",
@@ -881,8 +846,8 @@ def enhanced_full_record(users):
             "bucket": "81983514-22e5-473a-b521-24254bd5e049",
             "default_preview": "big-dataset.zip",
             "order": ["big-dataset.zip"],
-            "entries": [
-                {
+            "entries": {
+                "big-dataset.zip": {
                     "checksum": "md5:234245234213421342",
                     "mimetype": "application/zip",
                     "size": 1114324524355,
@@ -896,7 +861,7 @@ def enhanced_full_record(users):
                     "metadata": {},
                     "id": "445aaacd-9de1-41ab-af52-25ab6cb93df7",
                 }
-            ],
+            },
             "meta": {"big-dataset.zip": {"description": "File containing the data."}},
         },
         "notes": ["Under investigation for copyright infringement."],
@@ -972,7 +937,10 @@ def minimal_community2():
         "access": {
             "visibility": "public",
         },
-        "metadata": {"title": "Research Data Management", "type": {"id": "topic"}},
+        "metadata": {
+            "title": "Research Data Management",
+            "type": {"id": "topic"},
+        },
     }
 
 
@@ -1027,6 +995,48 @@ def parent(app, db):
     return RDMParent.create({})
 
 
+@pytest.fixture(scope="module")
+def moderator_role(app, database):
+    """Moderator role."""
+    REQUESTS_MODERATION_ROLE = app.config["REQUESTS_MODERATION_ROLE"]
+    mod_role = Role(name=REQUESTS_MODERATION_ROLE)
+    database.session.add(mod_role)
+
+    action_role = ActionRoles.create(action=user_management_action, role=mod_role)
+    database.session.add(action_role)
+    database.session.commit()
+    return mod_role
+
+
+@pytest.fixture(scope="module")
+def moderator_user(UserFixture, app, database, moderator_role):
+    """Admin user for requests."""
+    u = UserFixture(
+        email="mod@example.org",
+        password=hash_password("password"),
+        active=True,
+    )
+    u.create(app, database)
+    u.user.roles.append(moderator_role)
+
+    database.session.commit()
+    UserAggregate.index.refresh()
+    return u
+
+
+@pytest.fixture(scope="module")
+def mod_identity(app, moderator_user):
+    """Admin user for requests."""
+    idt = Identity(moderator_user.id)
+    REQUESTS_MODERATION_ROLE = app.config["REQUESTS_MODERATION_ROLE"]
+
+    # Add Role user_moderator
+    idt.provides.add(RoleNeed(REQUESTS_MODERATION_ROLE))
+    # Search requires user to be authenticated
+    idt.provides.add(Need(method="system_role", value="authenticated_user"))
+    return idt
+
+
 @pytest.fixture()
 def users(app, db):
     """Create example user."""
@@ -1078,6 +1088,16 @@ def identity_simple(users):
     i.provides.add(UserNeed(user.id))
     i.provides.add(Need(method="system_role", value="any_user"))
     i.provides.add(Need(method="system_role", value="authenticated_user"))
+    return i
+
+
+@pytest.fixture()
+def anonymous_identity(users):
+    """Simple identity fixture."""
+    user = users[1]
+    i = Identity(user.id)
+    i.provides.add(UserNeed(user.id))
+    i.provides.add(Need(method="system_role", value="any_user"))
     return i
 
 
@@ -1170,6 +1190,28 @@ def resource_type_v(app, resource_type_type):
             },
             "icon": "chart bar outline",
             "title": {"en": "Image"},
+            "tags": ["depositable", "linkable"],
+            "type": "resourcetypes",
+        },
+    )
+
+    vocabulary_service.create(
+        system_identity,
+        {  # create base resource type
+            "id": "software",
+            "props": {
+                "csl": "figure",
+                "datacite_general": "Software",
+                "datacite_type": "",
+                "openaire_resourceType": "0029",
+                "openaire_type": "software",
+                "eurepo": "info:eu-repo/semantic/other",
+                "schema.org": "https://schema.org/SoftwareSourceCode",
+                "subtype": "",
+                "type": "image",
+            },
+            "icon": "code",
+            "title": {"en": "Software"},
             "tags": ["depositable", "linkable"],
             "type": "resourcetypes",
         },
@@ -1467,6 +1509,7 @@ def awards_v(app, funders_v):
             },
             "funder": {"id": "00k4n6c32"},
             "acronym": "HIT-CF",
+            "program": "H2020",
         },
     )
 
@@ -1504,6 +1547,7 @@ RunningApp = namedtuple(
         "licenses_v",
         "funders_v",
         "awards_v",
+        "moderator_role",  # Add moderator role by default to the app
     ],
 )
 
@@ -1526,6 +1570,7 @@ def running_app(
     licenses_v,
     funders_v,
     awards_v,
+    moderator_role,
 ):
     """This fixture provides an app with the typically needed db data loaded.
 
@@ -1549,6 +1594,7 @@ def running_app(
         licenses_v,
         funders_v,
         awards_v,
+        moderator_role,
     )
 
 
@@ -1645,40 +1691,90 @@ def embargoed_record(running_app, minimal_record, superuser_identity):
 
 
 @pytest.fixture()
-def test_user(UserFixture, app, db):
+def test_user(UserFixture, app, db, index_users):
     """User meant to test permissions."""
     u = UserFixture(
         email="testuser@inveniosoftware.org",
         password="testuser",
     )
     u.create(app, db)
+    index_users()
     return u
 
 
 @pytest.fixture()
-def uploader(UserFixture, app, db):
+def verified_user(UserFixture, app, db):
+    """User meant to test 'verified' property of records."""
+    u = UserFixture(
+        email="verified@inveniosoftware.org",
+        password="testuser",
+    )
+    u.create(app, db)
+    u.user.verified_at = datetime.utcnow()
+    # Dumping `is_verified` requires authenticated user in tests
+    u.identity.provides.add(Need(method="system_role", value="authenticated_user"))
+    return u
+
+
+@pytest.fixture()
+def unverified_user(UserFixture, app, db):
+    """User meant to test 'verified' property of records."""
+    u = UserFixture(
+        email="unverified@inveniosoftware.org",
+        password="testuser",
+    )
+    u.create(app, db)
+    u.user.verified_at = None
+    # Dumping `is_verified` requires authenticated user in tests
+    u.identity.provides.add(Need(method="system_role", value="authenticated_user"))
+    return u
+
+
+@pytest.fixture()
+def uploader(UserFixture, app, db, index_users):
     """Uploader."""
     u = UserFixture(
         email="uploader@inveniosoftware.org",
         password="uploader",
+        preferences={
+            "visibility": "public",
+            "email_visibility": "restricted",
+            "notifications": {
+                "enabled": True,
+            },
+        },
+        active=True,
+        confirmed=True,
     )
     u.create(app, db)
+    index_users()
+
     return u
 
 
 @pytest.fixture()
-def community_owner(UserFixture, app, db):
+def community_owner(UserFixture, app, db, index_users):
     """Community owner."""
     u = UserFixture(
         email="community_owner@inveniosoftware.org",
         password="community_owner",
+        preferences={
+            "visibility": "public",
+            "email_visibility": "restricted",
+            "notifications": {
+                "enabled": True,
+            },
+        },
+        active=True,
+        confirmed=True,
     )
     u.create(app, db)
+    index_users()
     return u
 
 
 @pytest.fixture()
-def inviter():
+def inviter(index_users):
     """Add/invite a user to a community with a specific role."""
 
     def invite(user_id, community_id, role):
@@ -1697,6 +1793,7 @@ def inviter():
         current_communities.service.members.add(
             system_identity, community_id, invitation_data
         )
+        index_users()
 
     return invite
 
@@ -1707,6 +1804,15 @@ def curator(UserFixture, community, inviter, app, db):
     curator = UserFixture(
         email="curatoruser@inveniosoftware.org",
         password="curatoruser",
+        preferences={
+            "visibility": "public",
+            "email_visibility": "restricted",
+            "notifications": {
+                "enabled": True,
+            },
+        },
+        active=True,
+        confirmed=True,
     )
     curator.create(app, db)
     inviter(curator.id, community.id, "curator")
@@ -1764,7 +1870,10 @@ def community2(running_app, community_type_record, community_owner, minimal_comm
 
 @pytest.fixture()
 def restricted_community(
-    running_app, community_type_record, community_owner, restricted_minimal_community
+    running_app,
+    community_type_record,
+    community_owner,
+    restricted_minimal_community,
 ):
     """Get the current RDM records service."""
     return _community_get_or_create(
@@ -1774,7 +1883,10 @@ def restricted_community(
 
 @pytest.fixture()
 def open_review_community(
-    running_app, community_type_record, community_owner, open_review_minimal_community
+    running_app,
+    community_type_record,
+    community_owner,
+    open_review_minimal_community,
 ):
     """Create community with open review policy i.e allow direct publishes."""
     return _community_get_or_create(
@@ -1784,7 +1896,10 @@ def open_review_community(
 
 @pytest.fixture()
 def closed_review_community(
-    running_app, community_type_record, community_owner, closed_review_minimal_community
+    running_app,
+    community_type_record,
+    community_owner,
+    closed_review_minimal_community,
 ):
     """Create community with close review policy i.e allow direct publishes."""
     return _community_get_or_create(
@@ -1800,27 +1915,79 @@ def record_community(db, uploader, minimal_record, community):
         """Test record class."""
 
         def create_record(
-            self, record_dict=minimal_record, uploader=uploader, community=community
+            self,
+            record_dict=minimal_record,
+            uploader=uploader,
+            community=community,
         ):
             """Creates new record that belongs to the same community."""
             # create draft
-            community_record = community._record
             draft = current_rdm_records_service.create(uploader.identity, record_dict)
             # publish and get record
             result_item = current_rdm_records_service.publish(
                 uploader.identity, draft.id
             )
             record = result_item._record
-            # add the record to the community
-            record.parent.communities.add(community_record, default=False)
-            record.parent.commit()
-            db.session.commit()
-            current_rdm_records_service.indexer.index(
-                record, arguments={"refresh": True}
-            )
+            if community:
+                # add the record to the community
+                community_record = community._record
+                record.parent.communities.add(community_record, default=False)
+                record.parent.commit()
+                db.session.commit()
+                current_rdm_records_service.indexer.index(
+                    record, arguments={"refresh": True}
+                )
+
             return record
 
     return Record()
+
+
+@pytest.fixture()
+def record_factory(db, uploader, minimal_record, community, location):
+    """Creates a record that belongs to a community."""
+
+    class RecordFactory:
+        """Test record class."""
+
+        def create_record(
+            self,
+            record_dict=minimal_record,
+            uploader=uploader,
+            community=community,
+            file=None,
+        ):
+            """Creates new record that belongs to the same community."""
+            service = current_rdm_records_service
+            files_service = service.draft_files
+            idty = uploader.identity
+            # create draft
+            if file:
+                record_dict["files"] = {"enabled": True}
+            draft = service.create(idty, record_dict)
+
+            # add file to draft
+            if file:
+                files_service.init_files(idty, draft.id, data=[{"key": file}])
+                files_service.set_file_content(
+                    idty, draft.id, file, BytesIO(b"test file")
+                )
+                files_service.commit_file(idty, draft.id, file)
+
+            # publish and get record
+            result_item = service.publish(idty, draft.id)
+            record = result_item._record
+            if community:
+                # add the record to the community
+                community_record = community._record
+                record.parent.communities.add(community_record, default=False)
+                record.parent.commit()
+                db.session.commit()
+                service.indexer.index(record, arguments={"refresh": True})
+
+            return record
+
+    return RecordFactory()
 
 
 @pytest.fixture(scope="session")
@@ -1833,7 +2000,7 @@ def headers():
 
 
 @pytest.fixture()
-def admin(UserFixture, app, db, admin_role_need):
+def admin(UserFixture, app, db, admin_role_need, index_users):
     """Admin user for requests."""
     u = UserFixture(
         email="admin@inveniosoftware.org",
@@ -1846,6 +2013,7 @@ def admin(UserFixture, app, db, admin_role_need):
 
     datastore.add_role_to_user(u.user, role)
     db.session.commit()
+    index_users()
     return u
 
 
@@ -1877,3 +2045,36 @@ def oauth2_client(db, uploader):
         db.session.add(client_)
     db.session.commit()
     return client_.client_id
+
+
+@pytest.fixture()
+def index_users():
+    """Index users for an up-to-date user service."""
+
+    def _index():
+        current_users_service.indexer.process_bulk_queue()
+        current_users_service.record_cls.index.refresh()
+
+    return _index
+
+
+@pytest.fixture()
+def replace_notification_builder(monkeypatch):
+    """Replace a notification builder and return a mock."""
+
+    def _replace(builder_cls):
+        mock_build = mock.MagicMock()
+        mock_build.side_effect = builder_cls.build
+        monkeypatch.setattr(builder_cls, "build", mock_build)
+        # setting specific builder for test case
+        monkeypatch.setattr(
+            current_notifications_manager,
+            "builders",
+            {
+                **current_notifications_manager.builders,
+                builder_cls.type: builder_cls,
+            },
+        )
+        return mock_build
+
+    return _replace

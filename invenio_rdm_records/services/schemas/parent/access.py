@@ -15,6 +15,7 @@
 from datetime import timezone
 
 from marshmallow import Schema, fields, validate
+from marshmallow.validate import OneOf
 from marshmallow_utils.fields import (
     ISODateString,
     SanitizedHTML,
@@ -70,7 +71,8 @@ class AccessSettingsSchema(Schema):
     allow_user_requests = fields.Boolean()
     allow_guest_requests = fields.Boolean()
 
-    accept_conditions_text = SanitizedHTML()
+    accept_conditions_text = SanitizedHTML(allow_none=True)
+    secret_link_expiration = fields.Integer(validate=validate.Range(max=365, min=0))
 
 
 class ParentAccessSchema(Schema, FieldPermissionsMixin):
@@ -78,9 +80,8 @@ class ParentAccessSchema(Schema, FieldPermissionsMixin):
 
     field_dump_permissions = {
         # omit fields from dumps except for users with 'manage' permissions
-        # allow only 'settings'
+        # allow only 'settings' and 'owned_by'
         "grants": "manage",
-        "owned_by": "manage",
         "links": "manage",
     }
 
@@ -88,3 +89,13 @@ class ParentAccessSchema(Schema, FieldPermissionsMixin):
     owned_by = fields.Nested(Agent)
     links = fields.List(fields.Nested(SecretLink))
     settings = fields.Nested(AccessSettingsSchema)
+
+
+class RequestAccessSchema(Schema):
+    """Access request schema."""
+
+    permission = fields.Constant("view")
+    email = fields.Email()
+    full_name = SanitizedUnicode()
+    message = SanitizedUnicode()
+    consent_to_share_personal_data = fields.String(validate=OneOf(["true", "false"]))

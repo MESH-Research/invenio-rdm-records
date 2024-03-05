@@ -10,8 +10,9 @@
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """Bibliographic Record Resource."""
+from functools import wraps
 
-from flask import abort, current_app, g, send_file
+from flask import abort, current_app, g, redirect, send_file, url_for
 from flask_cors import cross_origin
 from flask_resources import (
     HTTPJSONException,
@@ -27,8 +28,8 @@ from flask_resources import (
 from importlib_metadata import version
 from invenio_drafts_resources.resources import RecordResource
 from invenio_drafts_resources.resources.records.errors import RedirectException
-from invenio_mail.tasks import send_email
 from invenio_records_resources.resources.errors import ErrorHandlersMixin
+from invenio_records_resources.resources.records.headers import etag_headers
 from invenio_records_resources.resources.records.resource import (
     request_data,
     request_extra_args,
@@ -38,9 +39,10 @@ from invenio_records_resources.resources.records.resource import (
     request_view_args,
 )
 from invenio_records_resources.resources.records.utils import search_preference
+from invenio_stats import current_stats
+from sqlalchemy.exc import NoResultFound
 from werkzeug.utils import secure_filename
 
-from ..requests.access import AccessRequestToken
 from .serializers import (
     IIIFCanvasV2JSONSerializer,
     IIIFInfoV2JSONSerializer,
@@ -70,17 +72,118 @@ class RDMRecordResource(RecordResource):
             route("POST", p(routes["item-actions-review"]), self.review_submit),
             route(
                 "POST",
-                p(routes["user-access-request"]),
-                self.create_user_access_request,
+                p(routes["record-access-request"]),
+                self.create_access_request,
             ),
             route(
-                "POST",
-                p(routes["guest-access-request"]),
-                self.create_guest_access_request_token,
+                "PUT",
+                p(routes["access-request-settings"]),
+                self.update_access_settings,
             ),
+            route("DELETE", p(routes["delete-record"]), self.delete_record),
+            route("POST", p(routes["restore-record"]), self.restore_record),
+            route("POST", p(routes["set-record-quota"]), self.set_record_quota),
+            # TODO: move to users?
+            route("POST", routes["set-user-quota"], self.set_user_quota),
         ]
 
         return url_rules
+
+    @request_extra_args
+    @request_read_args
+    @request_view_args
+    @response_handler()
+    def read(self):
+        """Read an item."""
+        try:
+            item = self.service.read(
+                g.identity,
+                resource_requestctx.view_args["pid_value"],
+                expand=resource_requestctx.args.get("expand", False),
+                # allows to access deleted record if permissions match
+                include_deleted=resource_requestctx.args.get("include_deleted", False),
+            )
+        except NoResultFound:
+            # If the parent pid is being used we can get the id of the latest record and redirect
+            latest_version = self.service.read_latest(
+                g.identity,
+                resource_requestctx.view_args["pid_value"],
+                expand=resource_requestctx.args.get("expand", False),
+            )
+            return (
+                redirect(
+                    url_for(
+                        ".read",
+                        pid_value=latest_version.id,
+                    )
+                ),
+                None,  # We pass None to create a tuple as the response_handler always expects an iterable
+            )
+
+        # we emit the record view stats event here rather than in the service because
+        # the service might be called from other places as well that we don't want
+        # to count, e.g. from some CLI commands
+        emitter = current_stats.get_event_emitter("record-view")
+        if item is not None and emitter is not None:
+            emitter(current_app, record=item._record, via_api=True)
+
+        return item.to_dict(), 200
+
+    @request_headers
+    @request_view_args
+    @request_data
+    def set_record_quota(self):
+        """Set record quota resource."""
+        item = self.service.set_quota(
+            g.identity,
+            resource_requestctx.view_args["pid_value"],
+            data=resource_requestctx.data,
+        )
+
+        return {}, 200
+
+    @request_headers
+    @request_view_args
+    @request_data
+    def set_user_quota(self):
+        """Set user quota resource."""
+        item = self.service.set_user_quota(
+            g.identity,
+            id_=resource_requestctx.view_args["pid_value"],
+            data=resource_requestctx.data,
+        )
+
+        return {}, 200
+
+    #
+    # Deletion workflows
+    #
+    @request_headers
+    @request_view_args
+    @request_data
+    def delete_record(self):
+        """Read the related review request."""
+        item = self.service.delete_record(
+            g.identity,
+            resource_requestctx.view_args["pid_value"],
+            resource_requestctx.data,
+            revision_id=resource_requestctx.headers.get("if_match"),
+        )
+
+        return item.to_dict(), 204
+
+    @request_headers
+    @request_view_args
+    @request_data
+    def restore_record(self):
+        """Read the related review request."""
+        item = self.service.restore_record(
+            g.identity,
+            resource_requestctx.view_args["pid_value"],
+            resource_requestctx.data,
+        )
+
+        return item.to_dict(), 200
 
     #
     # Review request
@@ -124,7 +227,6 @@ class RDMRecordResource(RecordResource):
     @request_headers
     @request_view_args
     @request_data
-    @response_handler()
     def review_submit(self):
         """Submit a draft for review or directly publish it."""
         require_review = False
@@ -172,25 +274,30 @@ class RDMRecordResource(RecordResource):
 
     @request_view_args
     @request_data
-    def create_user_access_request(self):
+    def create_access_request(self):
         """Request access to a record as authenticated user."""
-        item = self.service.access.create_user_access_request(
-            id_=resource_requestctx.view_args["pid_value"],
-            identity=g.identity,
-            message=resource_requestctx.data.get("message", ""),
-        )
-        return item.to_dict(), 200
-
-    @request_view_args
-    @request_data
-    def create_guest_access_request_token(self):
-        """Request access to a record as unauthenticated guest."""
-        item = self.service.access.create_guest_access_request_token(
+        item = self.service.access.request_access(
             id_=resource_requestctx.view_args["pid_value"],
             identity=g.identity,
             data=resource_requestctx.data,
         )
-        return item, 200
+        # TODO: improve the serialization here
+        # this is done due to guest access request creation returning a dictionary,
+        # not the request item (request item does not exist before email is confirmed)
+        if isinstance(item, dict):
+            return item, 200
+        return item.to_dict(), 200
+
+    @request_view_args
+    @request_data
+    def update_access_settings(self):
+        """Update record access settings."""
+        item = self.service.access.update_access_settings(
+            id_=resource_requestctx.view_args["pid_value"],
+            identity=g.identity,
+            data=resource_requestctx.data,
+        )
+        return item.to_dict(), 200
 
 
 class RDMRecordCommunitiesResource(ErrorHandlersMixin, Resource):
@@ -209,6 +316,7 @@ class RDMRecordCommunitiesResource(ErrorHandlersMixin, Resource):
             route("POST", routes["list"], self.add),
             route("DELETE", routes["list"], self.remove),
             route("GET", routes["suggestions"], self.get_suggestions),
+            route("PUT", routes["list"], self.set_default),
         ]
         return url_rules
 
@@ -280,6 +388,18 @@ class RDMRecordCommunitiesResource(ErrorHandlersMixin, Resource):
             expand=resource_requestctx.args.get("expand", False),
         )
         return items.to_dict(), 200
+
+    @request_view_args
+    @request_data
+    def set_default(self):
+        """Set default community."""
+        item = self.service.set_default(
+            id_=resource_requestctx.view_args["pid_value"],
+            identity=g.identity,
+            data=resource_requestctx.data,
+        )
+
+        return item, 200
 
 
 class RDMRecordRequestsResource(ErrorHandlersMixin, Resource):
@@ -572,7 +692,7 @@ def with_iiif_content_negotiation(serializer):
     """Always response as JSON LD regardless of the request type."""
     return with_content_negotiation(
         response_handlers={
-            "application/ld+json": ResponseHandler(serializer()),
+            "application/ld+json": ResponseHandler(serializer(), headers=etag_headers),
         },
         default_accept_mimetype="application/ld+json",
     )
@@ -615,7 +735,7 @@ class IIIFResource(ErrorHandlersMixin, Resource):
     @response_handler()
     def manifest(self):
         """Manifest."""
-        return self._get_record_with_files(), 200
+        return self._get_record_with_files().to_dict(), 200
 
     @cross_origin(origin="*", methods=["GET"])
     @with_iiif_content_negotiation(IIIFSequenceV2JSONSerializer)
@@ -623,7 +743,7 @@ class IIIFResource(ErrorHandlersMixin, Resource):
     @response_handler()
     def sequence(self):
         """Sequence."""
-        return self._get_record_with_files(), 200
+        return self._get_record_with_files().to_dict(), 200
 
     @cross_origin(origin="*", methods=["GET"])
     @with_iiif_content_negotiation(IIIFCanvasV2JSONSerializer)
@@ -634,7 +754,7 @@ class IIIFResource(ErrorHandlersMixin, Resource):
         uuid = resource_requestctx.view_args["uuid"]
         key = resource_requestctx.view_args["file_name"]
         file_ = self.service.get_file(uuid=uuid, identity=g.identity, key=key)
-        return file_, 200
+        return file_.to_dict(), 200
 
     @cross_origin(origin="*", methods=["GET"])
     @with_iiif_content_negotiation(IIIFInfoV2JSONSerializer)

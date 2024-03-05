@@ -10,21 +10,16 @@
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """DataCite-based data model for Invenio."""
+from flask import Blueprint
 from flask_iiif import IIIF
 from flask_principal import identity_loaded
 from invenio_records_resources.resources.files import FileResource
-from invenio_records_resources.services import FileService
-
-from invenio_rdm_records.oaiserver.resources.config import OAIPMHServerResourceConfig
-from invenio_rdm_records.oaiserver.resources.resources import OAIPMHServerResource
-from invenio_rdm_records.oaiserver.services.config import OAIPMHServerServiceConfig
-from invenio_rdm_records.oaiserver.services.services import OAIPMHServerService
-from invenio_rdm_records.services.communities.service import RecordCommunitiesService
-from invenio_rdm_records.services.community_inclusion.service import (
-    CommunityInclusionService,
-)
 
 from . import config
+from .oaiserver.resources.config import OAIPMHServerResourceConfig
+from .oaiserver.resources.resources import OAIPMHServerResource
+from .oaiserver.services.config import OAIPMHServerServiceConfig
+from .oaiserver.services.services import OAIPMHServerService
 from .resources import (
     IIIFResource,
     IIIFResourceConfig,
@@ -59,11 +54,14 @@ from .services import (
     RecordAccessService,
     RecordRequestsService,
 )
+from .services.communities.service import RecordCommunitiesService
+from .services.community_inclusion.service import CommunityInclusionService
 from .services.config import (
     RDMMediaFileDraftServiceConfig,
     RDMMediaFileRecordServiceConfig,
     RDMRecordMediaFilesServiceConfig,
 )
+from .services.files import RDMFileService
 from .services.pids import PIDManager, PIDsService
 from .services.review.service import ReviewService
 from .utils import verify_token
@@ -74,8 +72,6 @@ def on_identity_loaded(_, identity):
     """Add secret link token or resource access token need to the freshly loaded Identity."""
     verify_token(identity)
 
-
-from flask import Blueprint
 
 blueprint = Blueprint(
     "invenio_rdm_records",
@@ -151,8 +147,8 @@ class InvenioRDMRecords(object):
         # Services
         self.records_service = RDMRecordService(
             service_configs.record,
-            files_service=FileService(service_configs.file),
-            draft_files_service=FileService(service_configs.file_draft),
+            files_service=RDMFileService(service_configs.file),
+            draft_files_service=RDMFileService(service_configs.file_draft),
             access_service=RecordAccessService(service_configs.record),
             pids_service=PIDsService(service_configs.record, PIDManager),
             review_service=ReviewService(service_configs.record),
@@ -160,8 +156,8 @@ class InvenioRDMRecords(object):
 
         self.records_media_files_service = RDMRecordService(
             service_configs.record_with_media_files,
-            files_service=FileService(service_configs.media_file),
-            draft_files_service=FileService(service_configs.media_file_draft),
+            files_service=RDMFileService(service_configs.media_file),
+            draft_files_service=RDMFileService(service_configs.media_file_draft),
             pids_service=PIDsService(service_configs.record, PIDManager),
         )
 

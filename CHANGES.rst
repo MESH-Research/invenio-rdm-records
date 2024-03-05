@@ -1,5 +1,6 @@
+
 ..
-    Copyright (C) 2019-2023 CERN.
+    Copyright (C) 2019-2024 CERN.
     Copyright (C) 2019 Northwestern University.
 
 
@@ -9,6 +10,459 @@
 
 Changes
 =======
+
+Version 8.2.0 (released 2024-03-05)
+
+- bumps react-invenio-forms
+- ui: center disabled new version popup tooltip
+- fix: show popup tooltip on disabled new version button
+
+Version 8.1.1 (released 2024-02-27)
+
+- Revert "serializers: updated datacite schema rights."
+
+Version 8.1.0 (released 2024-02-27)
+
+- pids: allow empty-string PIDs
+- config: safer parent PID conditional check
+- serializers: updated datacite schema rights
+
+Version 8.0.0 (released 2024-02-20)
+
+- Bump due to major version upgrade in invenio-users-resources
+
+Version 7.1.1 (released 2024-02-19)
+
+- communities: add CommunityParentComponent
+
+Version 7.1.0 (released 2024-02-19)
+
+- mappings: change "dynamic" values to string
+- requests: change default removal reason to spam
+- mappings: add keyword field to ``funding.award.number``
+- files: fixed infinite spinning wheel on error
+- datacite: added config for funders id priority
+- datacite: updated schema
+- mapping: add community children
+
+Version 7.0.0 (released 2024-02-16)
+
+- services: update community components
+- installation: bump invenio-communities
+- mappings: denormalize communities in records
+- systemfields: fix docstrings
+- requests: add check on parent community on accept
+- community selection: small ui fixes
+
+Version 6.2.1 (released 2024-02-11)
+
+- requests: add record to parent community
+
+Version 6.2.0 (released 2024-02-09)
+
+- tests: make deleted file fetching deterministic
+- deposit: change upload workflow for styled communities
+- deposit: indicate if community selection modal is used for initial submission
+- deposit: add community.theme.enabled to selection modal
+- installation: bump invenio-communities version
+
+Version 6.1.1 (released 2024-02-05)
+
+- oai: exclude deleted records from search
+- models: add bucket_id index
+- serializers: fix DataDownload missing mimetype
+
+Version 6.1.0 (released 2024-02-01)
+
+- Add CSV records serializer
+
+Version 6.0.0 (released 2024-01-31)
+
+- installation: bump dependencies
+- installation: pin commonmeta-py
+
+Version 5.1.1 (released 2024-01-30)
+
+- Custom field ui: fix deserializing for primitive types
+
+Version 5.1.0 (released 2024-01-29)
+
+- pids: restore required PIDs on publish
+- schema: add dataset specific fields to jsonld
+
+Version 5.0.0 (2024-01-16)
+
+- communities: utilize community theming mechanism
+
+Version 4.43.2 (2023-01-16)
+
+- dependencies: pin commonmeta-py
+
+Version 4.43.1 (2023-12-12)
+
+- replace ckeditor with tinymce
+
+Version 4.43.0 (2023-12-11)
+
+- fixtures: method to add/update entries
+- fixtures: add KTH affiliation
+- chore: pycodestyle fix
+- tests: added cff serializer test
+- serializers: added yaml formatter
+- serializers: added cff
+- contrib: removed open terms from software fields
+- codemeta: fixed funding serialization
+- mappings: fix some mapping paths
+- mapping: add a text subfield for award acronyms
+- updated formatting
+- export: sanitized file name in dcat schema
+- export: santized filename in marcxml
+- deposit-ui: improve error messages
+
+Version 4.42.0 (2023-11-30)
+
+- services: add signals component
+- contrib: codemeta serializer
+
+Version 4.41.0 (2023-11-29)
+
+- metadata: use DateAndTime format for dates field
+- contrib: update imprint labels to be more descriptive
+- services: extend embargo check to all versions
+- service: improve check for record existance
+- generators: add community inclusion reviewers
+
+Version 4.40.0 (2023-11-20)
+
+- access: avoid setting ``access_request_token``
+- resources: add parent doi redirection
+- serializers: don't strip html for dc and marcxml
+- config: update OAISERVER_RECORD_SETS_FETCHER
+- deposit-ui: fix affiliations serialization
+
+Version 4.39.3 (2023-11-13)
+
+- secret-links: remove token from session on expiration
+
+Version 4.39.2 (2023-11-07)
+
+- resources: fix dcat serializer for restricted record files
+- email templates: fix access request submit templates
+- schemaorg: added fields to schema to improve fair score
+- notifications: send community inclusion emails to community managers
+
+Version 4.39.1 (2023-11-01)
+
+- installation: remove upper pin for invenio-oauth2server
+- draft: fix creatibutors affiliation de-duplication in select dropdown
+
+Version 4.39.0 (2023-10-31)
+
+- jsonschema: remove unique items constraints
+- ui: deposit fields license Custom SearchBar
+- fix: upload going blank on translation
+
+Version 4.38.3 (2023-10-30)
+
+- oaiserver: fix record loading for db results
+- tests: add OAI endpoint tests
+
+Version 4.38.2 (2023-10-27)
+
+- datacite: fix related identifiers serialization.
+
+Version 4.38.1 (2023-10-26)
+
+- files: updating url  encoding
+- entity: catch soft deleted draft
+- schemaorg: serialize "creator"
+- user access request e-mail: include requestor email address
+
+Version 4.38.0 (2023-10-25)
+
+- github: fix identity fetch for releases
+
+Version 4.37.4 (2023-10-25)
+
+- serializers: fix award serialization in marcxml
+- assets: improve email templates formatting
+
+Version 4.37.3 (2023-10-23)
+
+- subjects: validate that values are unique
+- github: added default repo creators
+- service: fix draft access on deleted published record
+
+Version 4.37.2 (2023-10-20)
+
+- email: case-insensitive comparison of user email
+- resources: make search request args class configurable
+- service: make search option class configurable
+- serializers: fix bibtex for github record-releases and requiring given_name field
+
+Version 4.37.1 (2023-10-19)
+
+- serializing: patch edtf date parser
+
+Version 4.37.0 (2023-10-19)
+
+- service config: change lock edit publish file
+- installation: bump invenio-drafts-resources
+
+Version 4.36.10 (2023-10-19)
+
+- access: relax serialization checks
+
+Version 4.36.9 (2023-10-18)
+
+- github: added support for extra metadata.
+- edit: fix serialization of creator roles
+- deposit: fix required identifiers for creators
+- serializers: fix wrongly used get
+
+Version 4.36.8 (2023-10-17)
+
+- github metadata: fix empty affiliations
+
+Version 4.36.7 (2023-10-17)
+
+- github: fixed authors serialization.
+
+Version 4.36.6 (2023-10-16)
+
+- reindex stats in batches of 10k
+
+Version 4.36.5 (2023-10-16)
+
+- allow users to delete pending files
+- fix beforeunload event in upload form
+
+Version 4.36.4 (2023-10-15)
+
+- remove dependency in `flask_login.current_user` on service layer
+
+Version 4.36.3 (2023-10-15)
+
+- fix search of drafts
+
+Version 4.36.2 (2023-10-14)
+
+- datastore: prevent autoflush on search
+
+Version 4.36.1 (2023-10-14)
+
+- github: read releases by user identity permission
+
+Version 4.36.0 (2023-10-13)
+
+- service add version scan method
+
+Version 4.35.0 (2023-10-13)
+
+- datacite: hide DOI on delete record admin action
+- datacite: show DOI on restore record admin action
+
+Version 4.34.0 (2023-10-12)
+
+- oai: add alias methods for backwards compatibility
+- oai: marcxml: string encoding bug
+- dependencies: upper pinned types requests.
+- add schemaorg serializer
+- oaiserver: add rebuild index method
+
+Version 4.33.2 (2023-10-11)
+
+- deposit form: improve UX of contributors modal
+- tombstone: fix information removed by Admin
+
+Version 4.33.1 (2023-10-10)
+
+- service: fix restore/delete of specific record version
+
+Version 4.33.0 (2023-10-09)
+
+- journal: ui serializer formatting improvements
+- serializers: ui - add publication date to journal citation
+- github: store name and family name of author
+
+Version 4.32.0 (2023-10-06)
+
+- deposit form: report invalid value errors on each draft save
+- access-requests: send notification on submit action
+- access-requests: replace EmailOp with NotificationOp on guest access token create
+- access-requests: replace EmailOp with NotificationOp
+
+Version 4.31.1 (2023-10-04)
+
+- deposit: make name's affiliation/id optionals
+
+Version 4.31.0 (2023-10-04)
+
+- files: add check for deleted record
+- communities: add resource and service handlers for setting default community
+- versions: add status param interpreter
+- communities-records: set correct links
+
+Version 4.30.0 (2023-10-03)
+
+- add task to reindex records to update views/downloads stats
+
+Version 4.29.0 (2023-10-03)
+
+- serializers: replace slugs caching with invenio-cache
+- assets: remove redundant recover on file upload fail
+- notifications: add submission accept action notification
+- ui: added autoFocus to Deposit Form modals
+
+Version 4.28.2 (2023-09-28)
+
+- serializers: fix cache ttl when fetching communities slugs
+
+Version 4.28.1 (2023-09-28)
+
+- serializers: use cache when fetching communities slugs
+- service: fix config sort object being wrongly updated
+
+Version 4.28.0 (2023-09-26)
+
+- services: add community deletion component
+- resources: fix response code on delete action
+- resources: accept if_match header with revision id on DELETE
+
+Version 4.27.0 (2023-09-22)
+
+- services: added record components config support
+- links: return parent_doi for both records and drafts
+
+Version 4.26.0 (2023-09-21)
+
+- deposit: add accessibility attributes
+- resources: add etag headers
+- search: query filter for deleted records on the main search endpoint
+- services: add search params
+
+Version 4.25.0 (2023-09-19)
+
+- permissions: allow moderator to see all drafts
+- services: filter out deleted records
+- service: add quota load schema
+
+Version 4.24.0 (2023-09-19)
+
+- community submission: fix modal text for different cases
+- resources: add administration and moderation actions
+- models: avoid flushing when getting records
+
+Version 4.23.2 (2023-09-17)
+
+- config: fix ADS bibcode idutils scheme
+
+Version 4.23.1 (2023-09-15)
+
+- resources: remove response handler from submit review
+
+Version 4.23.0 (2023-09-14)
+
+- fixtures: update names and affiliations to use model PIDs
+
+Version 4.22.0 (2023-09-14)
+
+- service: set records and user quota
+- deposit modals: fix modal headlines and list options styling for creatibutors
+
+Version 4.21.0 (2023-09-13)
+
+- service: prevent creating a request if invalid restrictions
+- mappings: added award acronym to os-v1 and es-v7
+
+Version 4.20.1 (2023-09-12)
+
+- records: adds conditional dumping of files
+- records: revert file dumper
+- entity_resolvers: add missing ghost_record representation
+- deposit: update headers for submit review action
+
+Version 4.20.0 (2023-09-11)
+
+- export formats: fix serializers
+- links: add media files archive link
+- moderation: delete user's records when blocking them
+- serializers: added locations to UI serializer
+
+Version 4.19.0 (2023-09-06)
+
+- custom fields: update namespace values
+- tokens: make RAT subject schema configurable
+- services: handle no-value DOI for links
+- deposit-ui: use "vnd.inveniordm.v1+json" always
+- access: serialize "owned_by" field
+- resources: add "x-bibtex" record serialization
+- resources: make record serializers configurable
+- schema: expose checksum and file ID
+- services: make record/draft API classes configurable
+
+Version 4.18.0 (2023-09-06)
+
+- uow: use ParentRecordCommitOp when committing parent
+- resolver: resolve records first when draft is published
+
+Version 4.17.0 (2023-09-05)
+
+- dumper: add files dumper ext
+- services: add record deletion workflow
+- alembic: fix record consent recipe
+
+Version 4.16.1 (2023-09-04)
+
+- stats: omit events from records without parent
+- views: fix non existing avatar fetch in guest access request
+
+Version 4.16.0 (2023-08-30)
+
+- access request: record the consent to share personal data
+- access request: ensure compliance of endpoints with the RFC
+- access request: add load serialization schema
+- oai-pmh: read oai sets prefix from app config
+
+Version 4.15.1 (2023-08-25)
+
+- access-field: rely on `instance.files.enabled` to indicate if files exist or not
+
+Version 4.15.0 (2023-08-24)
+
+- access request: add secret_link_expiration to guest access request payload schema
+- permissions: add create/update conditions for managing access options
+- views: add error handlers to the blueprint
+- access request: add permission on secret_link_expiration request field
+
+
+Version 4.14.0 (2023-08-17)
+
+- alembic: add recipe for files and media files versioning
+- permissions: fix permissions about whom can add a record to community
+- service: lock record files conditionally
+- search: added 'verified' field sort option
+- records: added verified field to record
+- permissions: extract base permissions
+- deposit: set color of discard button
+- github: remove python 3.7 from the tests
+- records: add tombstone and deletion status
+- access request: add secret link expiration access request setting
+- deposit: fix license modal
+
+Version 4.13.1 (2023-08-11)
+
+- vocabularies: add new values to resource types
+
+Version 4.13.0 (2023-08-09)
+
+- alembic: fix wrong revision id
+- access requests: new endpoint to update access request settings
+- doi: fix exception logging
+- tasks: discover missing celery task for access requests
+- notifications: filter out creator when creating requests
+- user moderation: add empty actions hooks
+- ui: fix layout issues with community modals
 
 Version 4.12.2 (2023-07-25)
 
