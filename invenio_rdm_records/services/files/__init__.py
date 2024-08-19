@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 CERN.
+# Copyright (C) 2023 CERN.
 #
 # Invenio-RDM-Records is free software; you can redistribute it and/or modify
 # it under the terms of the MIT License; see LICENSE file for more details.
 
-"""module for Secret Link service."""
+"""File Service API."""
+from invenio_rdm_records.services.files.service import RDMFileService
 
-from .service import SecretLinkService
-
-__all__ = ("SecretLinkService",)
+__all__ = ("RDMFileService",)

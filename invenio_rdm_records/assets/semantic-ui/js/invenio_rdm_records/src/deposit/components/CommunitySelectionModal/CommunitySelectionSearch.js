@@ -7,7 +7,7 @@
 
 import { i18next } from "@translations/invenio_rdm_records/i18next";
 import React, { Component } from "react";
-import { OverridableContext } from "react-overridable";
+import { OverridableContext, parametrize } from "react-overridable";
 import {
   EmptyResults,
   Error,
@@ -18,7 +18,7 @@ import {
   ResultsLoader,
   SearchBar,
 } from "react-searchkit";
-import { Container, Grid, Menu, Modal, Segment } from "semantic-ui-react";
+import { Grid, Menu, Modal } from "semantic-ui-react";
 import { CommunityListItem } from "./CommunityListItem";
 import PropTypes from "prop-types";
 
@@ -29,17 +29,15 @@ export class CommunitySelectionSearch extends Component {
       apiConfigs: { allCommunities },
     } = this.props;
 
-    const defaultConfig = allCommunities;
-
     this.state = {
-      selectedConfig: defaultConfig,
+      selectedConfig: allCommunities,
     };
   }
 
   render() {
     const {
       selectedConfig: {
-        searchApi: selectedsearchApi,
+        searchApi: selectedSearchApi,
         appId: selectedAppId,
         initialQueryState: selectedInitialQueryState,
         toggleText,
@@ -47,10 +45,15 @@ export class CommunitySelectionSearch extends Component {
     } = this.state;
     const {
       apiConfigs: { allCommunities, myCommunities },
+      record,
+      isInitialSubmission,
     } = this.props;
-    const searchApi = new InvenioSearchApi(selectedsearchApi);
+    const searchApi = new InvenioSearchApi(selectedSearchApi);
     const overriddenComponents = {
-      [`${selectedAppId}.ResultsList.item`]: CommunityListItem,
+      [`${selectedAppId}.ResultsList.item`]: parametrize(CommunityListItem, {
+        record: record,
+        isInitialSubmission: isInitialSubmission,
+      }),
     };
     return (
       <OverridableContext.Provider value={overriddenComponents}>
@@ -60,10 +63,18 @@ export class CommunitySelectionSearch extends Component {
           searchApi={searchApi}
           key={selectedAppId}
           initialQueryState={selectedInitialQueryState}
+          defaultSortingOnEmptyQueryString={{ sortBy: "bestmatch" }}
         >
-          <Grid>
-            <Grid.Row verticalAlign="middle">
-              <Grid.Column width={8} textAlign="left" floated="left">
+          <>
+            <Modal.Content as={Grid} className="m-0 pb-0">
+              <Grid.Column
+                mobile={16}
+                tablet={8}
+                computer={8}
+                textAlign="left"
+                floated="left"
+                className="pt-0 pl-0"
+              >
                 <Menu role="tablist" compact>
                   <Menu.Item
                     as="button"
@@ -99,7 +110,14 @@ export class CommunitySelectionSearch extends Component {
                   </Menu.Item>
                 </Menu>
               </Grid.Column>
-              <Grid.Column width={8} floated="right" verticalAlign="middle">
+              <Grid.Column
+                mobile={16}
+                tablet={8}
+                computer={8}
+                floated="right"
+                verticalAlign="middle"
+                className="pt-0 pr-0 pl-0"
+              >
                 <SearchBar
                   placeholder={toggleText}
                   autofocus
@@ -111,30 +129,25 @@ export class CommunitySelectionSearch extends Component {
                   }}
                 />
               </Grid.Column>
-            </Grid.Row>
+            </Modal.Content>
 
-            <Grid.Row verticalAlign="middle">
-              <Grid.Column>
-                <ResultsLoader>
-                  <Segment className="community-list-container p-0">
-                    <Modal.Content
-                      role="tabpanel"
-                      id={selectedAppId}
-                      scrolling
-                      className="community-list-results"
-                    >
-                      <EmptyResults />
-                      <Error />
-                      <ResultsList />
-                    </Modal.Content>
-                  </Segment>
-                  <Container textAlign="center">
-                    <Pagination />
-                  </Container>
-                </ResultsLoader>
-              </Grid.Column>
-            </Grid.Row>
-          </Grid>
+            <Modal.Content
+              role="tabpanel"
+              id={selectedAppId}
+              scrolling
+              className="community-list-results"
+            >
+              <ResultsLoader>
+                <EmptyResults />
+                <Error />
+                <ResultsList />
+              </ResultsLoader>
+            </Modal.Content>
+
+            <Modal.Content className="text-align-center">
+              <Pagination />
+            </Modal.Content>
+          </>
         </ReactSearchKit>
       </OverridableContext.Provider>
     );
@@ -154,12 +167,15 @@ CommunitySelectionSearch.propTypes = {
       searchApi: PropTypes.object.isRequired,
     }),
   }),
+  record: PropTypes.object.isRequired,
+  isInitialSubmission: PropTypes.bool,
 };
 
 CommunitySelectionSearch.defaultProps = {
+  isInitialSubmission: true,
   apiConfigs: {
     allCommunities: {
-      initialQueryState: { size: 5, page: 1 },
+      initialQueryState: { size: 5, page: 1, sortBy: "bestmatch" },
       searchApi: {
         axios: {
           url: "/api/communities",
@@ -170,7 +186,7 @@ CommunitySelectionSearch.defaultProps = {
       toggleText: "Search in all communities",
     },
     myCommunities: {
-      initialQueryState: { size: 5, page: 1 },
+      initialQueryState: { size: 5, page: 1, sortBy: "bestmatch" },
       searchApi: {
         axios: {
           url: "/api/user/communities",

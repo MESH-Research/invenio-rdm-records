@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 CERN.
+# Copyright (C) 2021-2024 CERN.
 # Copyright (C) 2023 Graz University of Technology.
 #
 # Invenio-RDM-Records is free software; you can redistribute it and/or modify
@@ -24,7 +24,7 @@ class PIDManager:
     def __init__(self, providers, required_schemes=None):
         """Constructor for RecordService."""
         self._providers = providers
-        self._required_schemes = required_schemes
+        self._required_schemes = required_schemes if required_schemes else []
 
     def _get_provider(self, scheme, provider_name=None):
         """Get a provider."""
@@ -35,6 +35,21 @@ class PIDManager:
             return providers[provider_name]
         except KeyError:
             raise ProviderNotSupportedError(provider_name, scheme)
+
+    def _get_providers(self, pids):
+        """Get all providers."""
+        schemes = set(pids.keys()) | set(self._required_schemes)
+        scheme_provider_names = [
+            # provider_name for an absent-but-required pid will be None which will
+            # in turn select the default provider below
+            (scheme, pids.get(scheme, {}).get("provider"))
+            for scheme in schemes
+        ]
+        provider_pid_dicts = [
+            (self._get_provider(scheme, provider_name), pids.get(scheme, {}))
+            for scheme, provider_name in scheme_provider_names
+        ]
+        return provider_pid_dicts
 
     def _validate_pids_schemes(self, pids):
         """Validate the pid schemes that are supported by the service.
@@ -98,17 +113,7 @@ class PIDManager:
         # Validate according to the schemes that the draft has and the schemes that
         # the draft would be given. _required_schemes are schemes that would be given
         # (if not already on the draft).
-        schemes = set(pids.keys()) | set(self._required_schemes)
-        scheme_provider_names = [
-            # provider_name for an absent-but-required pid will be None which will
-            # in turn select the default provider below
-            (scheme, pids.get(scheme, {}).get("provider"))
-            for scheme in schemes
-        ]
-        provider_pid_dicts = [
-            (self._get_provider(scheme, provider_name), pids.get(scheme, {}))
-            for scheme, provider_name in scheme_provider_names
-        ]
+        provider_pid_dicts = self._get_providers(pids)
 
         for provider, pid_dict in provider_pid_dicts:
             success, provider_errors = provider.validate(
@@ -142,7 +147,7 @@ class PIDManager:
         """
         provider = self._get_provider(scheme, provider_name)
         pid_attrs = {}
-        if identifier:
+        if identifier is not None:
             try:
                 pid = provider.get(identifier)
             except PIDDoesNotExistError:
@@ -198,7 +203,7 @@ class PIDManager:
 
         return result
 
-    def update(self, record, scheme):
+    def update(self, record, scheme, url=None):
         """Update a registered PID on a remote provider."""
         pid_attrs = record.pids.get(scheme, None)
         if not pid_attrs:
@@ -206,13 +211,13 @@ class PIDManager:
                 message=_("PID not found for type {scheme}").format(
                     scheme=scheme
                 ),
-                field_name=f"pids",
+                field_name="pids",
             )
 
         provider = self._get_provider(scheme, pid_attrs["provider"])
         pid = provider.get(pid_attrs["identifier"])
 
-        provider.update(pid, record=record)
+        provider.update(pid, record=record, url=url)
 
     def reserve(self, draft, scheme, identifier, provider_name):
         """Reserve a PID."""
@@ -236,7 +241,7 @@ class PIDManager:
                 message=_("PID not found for type {scheme}").format(
                     scheme=scheme
                 ),
-                field_name=f"pids",
+                field_name="pids",
             )
 
         provider = self._get_provider(scheme, pid_attrs["provider"])
@@ -244,11 +249,17 @@ class PIDManager:
 
         provider.register(pid, record=record, url=url)
 
-    def discard(self, scheme, identifier, provider_name=None):
+    def discard(
+        self, scheme, identifier, provider_name=None, soft_delete=False
+    ):
         """Discard a PID."""
         provider = self._get_provider(scheme, provider_name)
         pid = provider.get(identifier)
-        if not provider.can_modify(pid):
+
+        # soft delete defines if the action comes from an admin or a regular user
+        # regular user never tries to soft delete
+        # TODO come up with better architecture
+        if not provider.can_modify(pid) and not soft_delete:
             raise ValidationError(
                 message=[
                     {
@@ -261,16 +272,53 @@ class PIDManager:
                 ]
             )
 
-        provider.delete(pid)
+        # the provider should check the conditions of deletion
+        provider.delete(pid, soft_delete=soft_delete)
 
-    def discard_all(self, pids):
-        """Discard all PIDs."""
+    def restore(self, scheme, identifier, provider_name=None):
+        """Restore previously invalidated DOI."""
+        provider = self._get_provider(scheme, provider_name)
+        pid = provider.get(identifier)
+        provider.restore(pid)
+
+    def restore_all(self, pids):
+        """Restore all pids."""
         for scheme, pid_attrs in pids.items():
             try:
-                self.discard(
+                self.restore(
                     scheme,
                     pid_attrs["identifier"],
                     pid_attrs["provider"],
                 )
             except PIDDoesNotExistError:
                 pass  # might not have been saved to DB yet
+
+    def discard_all(self, pids, soft_delete=False):
+        """Discard all PIDs."""
+        for scheme, pid_attrs in pids.items():
+            try:
+                self.discard(
+                    scheme,
+                    pid_attrs.get("identifier"),
+                    pid_attrs.get("provider"),
+                    soft_delete=soft_delete,
+                )
+            except PIDDoesNotExistError:
+                pass  # might not have been saved to DB yet
+
+    def validate_restriction_level(self, record, **kwargs):
+        """Validates that the record has correct restriction levels to crate the PIDs."""
+        pids = record.get("pids", {})
+        provider_pid_dicts = self._get_providers(pids)
+
+        for provider, pid_dict in provider_pid_dicts:
+            provider.validate_restriction_level(
+                record, identifier=pid_dict.get("identifier")
+            )
+
+    def create_and_reserve(self, record, **kwargs):
+        """Create and reserve a PID for the given record, and update the record with the reserved PID."""
+        pids = record.get("pids", {})
+        provider_pid_dicts = self._get_providers(pids)
+        for provider, _ in provider_pid_dicts:
+            provider.create_and_reserve(record)

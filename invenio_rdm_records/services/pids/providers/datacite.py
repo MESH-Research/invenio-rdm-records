@@ -2,7 +2,7 @@
 #
 # Copyright (C) 2021 CERN.
 # Copyright (C) 2023 Northwestern University.
-# Copyright (C) 2023 Graz University of Technology.
+# Copyright (C) 2023-2024 Graz University of Technology.
 #
 # Invenio-RDM-Records is free software; you can redistribute it and/or modify
 # it under the terms of the MIT License; see LICENSE file for more details.
@@ -11,25 +11,33 @@
 
 import json
 import warnings
+from collections import ChainMap
+from json import JSONDecodeError
 
 from datacite import DataCiteRESTClient
-from datacite.errors import DataCiteError
+from datacite.errors import (
+    DataCiteError,
+    DataCiteNoContentError,
+    DataCiteNotFoundError,
+    DataCiteServerError,
+)
 from flask import current_app
 from invenio_i18n import lazy_gettext as _
 from invenio_pidstore.models import PIDStatus
 
-from invenio_rdm_records.resources.serializers import DataCite43JSONSerializer
-
+from ....resources.serializers import DataCite43JSONSerializer
+from ....utils import ChainObject
 from .base import PIDProvider
 
 
 class DataCiteClient:
     """DataCite Client."""
 
-    def __init__(self, name, config_prefix=None, **kwargs):
+    def __init__(self, name, config_prefix=None, config_overrides=None, **kwargs):
         """Constructor."""
         self.name = name
         self._config_prefix = config_prefix or "DATACITE"
+        self._config_overrides = config_overrides or {}
         self._api = None
 
     def cfgkey(self, key):
@@ -38,7 +46,8 @@ class DataCiteClient:
 
     def cfg(self, key, default=None):
         """Get a application config value."""
-        return current_app.config.get(self.cfgkey(key), default)
+        config = ChainMap(self._config_overrides, current_app.config)
+        return config.get(self.cfgkey(key), default)
 
     def generate_doi(self, record):
         """Generate a DOI."""
@@ -106,21 +115,38 @@ class DataCitePIDProvider(PIDProvider):
         self.serializer = serializer or DataCite43JSONSerializer()
 
     @staticmethod
-    def _log_errors(errors):
+    def _log_errors(exception):
         """Log errors from DataCiteError class."""
-        # DataCiteError is a tuple with the errors on the first
-        errors = json.loads(errors.args[0])["errors"]
-        for error in errors:
-            field = error.get("source", None)
-            reason = error["title"]
-            current_app.logger.warning(
-                f"Error in {field if field else 'Missing field'}: {reason}"
-            )
+        # DataCiteError will have the response msg as first arg
+        ex_txt = exception.args[0] or ""
+        if isinstance(exception, DataCiteNoContentError):
+            current_app.logger.error(f"No content error: {ex_txt}")
+        elif isinstance(exception, DataCiteServerError):
+            current_app.logger.error(f"DataCite internal server error: {ex_txt}")
+        else:
+            # Client error 4xx status code
+            try:
+                ex_json = json.loads(ex_txt)
+            except JSONDecodeError:
+                current_app.logger.error(f"Unknown error: {ex_txt}")
+                return
+
+            # the `errors` field is only available when a 4xx error happened (not 500)
+            for error in ex_json.get("errors", []):
+                reason = error["title"]
+                field = error.get("source")  # set when missing/wrong required field
+                error_prefix = f"Error in `{field}`: " if field else "Error: "
+                current_app.logger.error(f"{error_prefix}{reason}")
 
     def generate_id(self, record, **kwargs):
         """Generate a unique DOI."""
         # Delegate to client
         return self.client.generate_doi(record)
+
+    @classmethod
+    def is_enabled(cls, app):
+        """Determine if datacite is enabled or not."""
+        return app.config.get("DATACITE_ENABLED", False)
 
     def can_modify(self, pid, **kwargs):
         """Checks if the PID can be modified."""
@@ -133,6 +159,12 @@ class DataCitePIDProvider(PIDProvider):
         :param record: the record metadata for the DOI.
         :returns: `True` if is registered successfully.
         """
+        if isinstance(record, ChainObject):
+            if record._child["access"]["record"] == "restricted":
+                return False
+        elif record["access"]["record"] == "restricted":
+            return False
+
         local_success = super().register(pid)
         if not local_success:
             return False
@@ -144,7 +176,7 @@ class DataCitePIDProvider(PIDProvider):
             return True
         except DataCiteError as e:
             current_app.logger.warning(
-                "DataCite provider error when " f"registering DOI for {pid.pid_value}"
+                f"DataCite provider error when registering DOI for {pid.pid_value}"
             )
             self._log_errors(e)
 
@@ -158,13 +190,25 @@ class DataCitePIDProvider(PIDProvider):
         :param record: the record metadata for the DOI.
         :returns: `True` if is updated successfully.
         """
+        hide = False
+        if isinstance(record, ChainObject):
+            if record._child["access"]["record"] == "restricted":
+                hide = True
+        elif record["access"]["record"] == "restricted":
+            hide = True
+
         try:
-            # Set metadata
-            doc = self.serializer.dump_obj(record)
-            self.client.api.update_doi(metadata=doc, doi=pid.pid_value, url=url)
+            if hide:
+                self.client.api.hide_doi(doi=pid.pid_value)
+            else:
+                doc = self.serializer.dump_obj(record)
+                doc["event"] = (
+                    "publish"  # Required for DataCite to make the DOI findable in the case it was hidden before. See https://support.datacite.org/docs/how-do-i-make-a-findable-doi-with-the-rest-api
+                )
+                self.client.api.update_doi(metadata=doc, doi=pid.pid_value, url=url)
         except DataCiteError as e:
             current_app.logger.warning(
-                "DataCite provider error when " f"updating DOI for {pid.pid_value}"
+                f"DataCite provider error when updating DOI for {pid.pid_value}"
             )
             self._log_errors(e)
 
@@ -174,6 +218,14 @@ class DataCitePIDProvider(PIDProvider):
             return pid.sync_status(PIDStatus.REGISTERED)
 
         return True
+
+    def restore(self, pid, **kwargs):
+        """Restore previously deactivated DOI."""
+        try:
+            self.client.api.show_doi(pid.pid_value)
+        except DataCiteNotFoundError as e:
+            if not current_app.config["DATACITE_TEST_MODE"]:
+                raise e
 
     def delete(self, pid, **kwargs):
         """Delete/unregister a registered DOI.
@@ -189,7 +241,7 @@ class DataCitePIDProvider(PIDProvider):
                 self.client.api.hide_doi(pid.pid_value)
         except DataCiteError as e:
             current_app.logger.warning(
-                "DataCite provider error when deleting " f"DOI for {pid.pid_value}"
+                f"DataCite provider error when deleting DOI for {pid.pid_value}"
             )
             self._log_errors(e)
 
@@ -232,3 +284,21 @@ class DataCitePIDProvider(PIDProvider):
             )
 
         return not bool(errors), errors
+
+    def validate_restriction_level(self, record, identifier=None, **kwargs):
+        """Remove the DOI if the record is restricted."""
+        if identifier and record["access"]["record"] == "restricted":
+            pid = self.get(identifier)
+            if pid.status in [PIDStatus.NEW]:
+                self.delete(pid)
+                del record["pids"][self.pid_type]
+
+    def create_and_reserve(self, record, **kwargs):
+        """Create and reserve a DOI for the given record, and update the record with the reserved DOI."""
+        if "doi" not in record.pids:
+            pid = self.create(record)
+            self.reserve(pid, record=record)
+            pid_attrs = {"identifier": pid.pid_value, "provider": self.name}
+            if self.client:
+                pid_attrs["client"] = self.client.name
+            record.pids["doi"] = pid_attrs

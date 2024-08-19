@@ -18,7 +18,8 @@ from invenio_records_resources.services.errors import PermissionDeniedError
 from invenio_records_resources.services.uow import unit_of_work
 from invenio_search.engine import dsl
 
-from invenio_rdm_records.proxies import current_record_communities_service
+from ...proxies import current_record_communities_service
+from ...records.systemfields.deletion_status import RecordDeletionStatusEnum
 
 
 class CommunityRecordsService(RecordService):
@@ -58,6 +59,11 @@ class CommunityRecordsService(RecordService):
         community_filter = dsl.Q(
             "term", **{"parent.communities.ids": str(community.id)}
         )
+        status = RecordDeletionStatusEnum.PUBLISHED.value
+
+        published_filter = dsl.Q("term", **{"deletion_status": status})
+        community_filter &= published_filter
+
         if extra_filter is not None:
             community_filter = community_filter & extra_filter
 

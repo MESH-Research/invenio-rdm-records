@@ -18,13 +18,13 @@ import {
   InvenioSearchApi,
   ReactSearchKit,
   ResultsLoader,
-  SearchBar,
   Toggle,
 } from "react-searchkit";
-import { Button, Form, Grid, Header, Menu, Modal } from "semantic-ui-react";
+import { Button, Form, Grid, Menu, Modal } from "semantic-ui-react";
 import * as Yup from "yup";
 import { LicenseFilter } from "./LicenseFilter";
 import { LicenseResults } from "./LicenseResults";
+import { LicenseSearchBar } from "./LicenseSearchBar";
 
 const overriddenComponents = {
   "SearchFilters.Toggle": LicenseFilter,
@@ -60,13 +60,14 @@ export class LicenseModal extends Component {
     this.setState({ open: false });
   };
 
-  onSubmit = (values) => {
+  onSubmit = (values, formikBag) => {
     // We have to close the modal first because onLicenseChange and passing
     // license as an object makes React get rid of this component. Otherwise
     // we get a memory leak warning.
     const { onLicenseChange } = this.props;
     this.closeModal();
     onLicenseChange(values.selectedLicense);
+    formikBag.resetForm();
   };
 
   render() {
@@ -103,24 +104,21 @@ export class LicenseModal extends Component {
             onOpen={() => this.openModal()}
             open={open}
             trigger={trigger}
-            onClose={this.closeModal}
+            onClose={() => {
+              this.closeModal();
+              resetForm();
+            }}
             closeIcon
             closeOnDimmerClick={false}
           >
-            <Modal.Header as="h6" className="pt-10 pb-10">
-              <Grid>
-                <Grid.Column floated="left">
-                  <Header as="h2">
-                    {action === ModalActions.ADD
-                      ? i18next.t(`Add {{mode}} license`, {
-                          mode: mode,
-                        })
-                      : i18next.t(`Change {{mode}} license`, {
-                          mode: mode,
-                        })}
-                  </Header>
-                </Grid.Column>
-              </Grid>
+            <Modal.Header as="h2" className="pt-10 pb-10">
+              {action === ModalActions.ADD
+                ? i18next.t(`Add {{mode}} license`, {
+                    mode: mode,
+                  })
+                : i18next.t(`Change {{mode}} license`, {
+                    mode: mode,
+                  })}
             </Modal.Header>
             <Modal.Content scrolling>
               {mode === ModalTypes.STANDARD && (
@@ -134,7 +132,7 @@ export class LicenseModal extends Component {
                     <Grid>
                       <Grid.Row>
                         <Grid.Column width={8} floated="left" verticalAlign="middle">
-                          <SearchBar
+                          <LicenseSearchBar
                             placeholder={i18next.t("Search")}
                             autofocus
                             actionProps={{
@@ -193,6 +191,8 @@ export class LicenseModal extends Component {
                     placeholder={i18next.t("License title")}
                     fieldPath="selectedLicense.title"
                     required
+                    // eslint-disable-next-line
+                    autoFocus
                   />
                   <TextAreaField
                     fieldPath="selectedLicense.description"

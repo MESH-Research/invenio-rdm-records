@@ -7,12 +7,12 @@
   },
   "pids": {
     "doi": {
-      "identifier": "10.5281/zenodo.1234",
+      "identifier": "10.1234/zenodo.1234",
       "provider": "datacite",
       "client": "zenodo"
     },
     "concept-doi": {
-      "identifier": "10.5281/zenodo.1234",
+      "identifier": "10.1234/zenodo.1234",
       "provider": "datacite",
       "client": "zenodo"
     },
@@ -27,9 +27,13 @@
     }
   },
   "tombstone": {
-    "reason": "Spam record, removed by InvenioRDM staff.",
-    "category": "spam_manual",
-    "removed_by": {"user": 1},
-    "timestamp": "2020-09-01T12:02:00+0000"
+    "removal_reason": {
+      "id": "spam"
+    },
+    "note": "Spam record, manually removed by InvenioRDM staff.",
+    "removed_by": {
+      "user": 1
+    },
+    "removal_date": "2020-09-01T12:02:00+0000"
   }
 }

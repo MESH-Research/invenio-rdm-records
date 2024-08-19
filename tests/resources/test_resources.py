@@ -272,7 +272,6 @@ def _create_and_publish(client, minimal_record, headers):
     """Create a draft and publish it."""
     # Create the draft
     response = client.post("/records", json=minimal_record, headers=headers)
-
     assert response.status_code == 201
     recid = response.json["id"]
     _validate_access(response.json, minimal_record)
@@ -449,7 +448,7 @@ def test_multiple_files_record(
     filename2 = "test2.txt"
     file_content2 = b"testfile2"
 
-    _create_and_assert_file(client, headers, recid, filename1, file_content2)
+    _create_and_assert_file(client, headers, recid, filename1, file_content1)
     _create_and_assert_file(client, headers, recid, filename2, file_content2)
 
     response = client.post(f"/records/{recid}/draft/actions/publish", headers=headers)
@@ -611,7 +610,7 @@ def test_link_creation(
     """Test the creation of secret links."""
     client = client_with_login
     in_10_days = datetime.utcnow() + timedelta(days=10)
-    in_10_days_str = in_10_days.strftime("%Y-%m-%dT00:00:00")
+    in_10_days_str = in_10_days.strftime("%Y-%m-%d")
 
     # Create and publish a draft
     recid = _create_and_publish(client, minimal_record, headers)
@@ -727,11 +726,11 @@ def test_link_update(
     client = client_with_login
     # Note, we test with and without timezone aware timestamps.
     in_10_days = datetime.utcnow() + timedelta(days=10)
-    in_10_days_str = in_10_days.replace(tzinfo=timezone.utc).isoformat()
+    in_10_days_str = in_10_days.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d")
     in_20_days = arrow.utcnow() + timedelta(days=20)
-    in_20_days_str = in_20_days.isoformat()
+    in_20_days_str = in_20_days.strftime("%Y-%m-%d")
     _10_days_ago = datetime.utcnow() - timedelta(days=10)
-    _10_days_ago_str = _10_days_ago.isoformat()
+    _10_days_ago_str = _10_days_ago.strftime("%Y-%m-%d")
 
     # Create and publish a draft
     recid = _create_and_publish(client, minimal_record, headers)
@@ -796,6 +795,7 @@ def test_response_handlers(running_app, minimal_record, client_with_login):
         "application/x-dc+xml",
         "text/x-bibliography",
         "application/dcat+xml",
+        "application/linkset+json",
     ]
 
     headers = {

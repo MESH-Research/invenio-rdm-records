@@ -13,14 +13,16 @@
   },
   "affiliations": {
     "type": "array",
-    "items": {"$ref": "#/affiliation"},
-    "uniqueItems": true
+    "items": {"$ref": "#/affiliation"}
   },
   "agent": {
     "description": "An agent (user, software process, community, ...).",
     "oneOf": [
       {
         "$ref": "#/user"
+      },
+      {
+        "type": "null"
       }
     ]
   },
@@ -384,8 +386,7 @@
   },
   "subjects": {
     "type": "array",
-    "items": {"$ref": "#/subject"},
-    "uniqueItems": true
+    "items": {"$ref": "#/subject"}
   },
   "title_type": {
     "description": "Type of title.",
@@ -403,7 +404,17 @@
     "additionalProperties": false,
     "properties": {
       "user": {
-        "type": "integer"
+        "type": ["string", "integer"]
+      }
+    }
+  },
+  "removal_reason": {
+    "type": "object",
+    "additionalProperties": false,
+    "description": "Reason for the removal of a record.",
+    "properties": {
+      "id": {
+        "$ref": "local://definitions-v1.0.0.json#/identifier"
       }
     }
   }

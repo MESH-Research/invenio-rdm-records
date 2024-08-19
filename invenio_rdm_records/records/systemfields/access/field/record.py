@@ -174,7 +174,9 @@ class RecordAccessField(SystemField):
 
         data = self.get_dictkey(instance)
         if data:
-            obj = self._access_obj_class.from_dict(data, has_files=len(instance.files))
+            obj = self._access_obj_class.from_dict(
+                data, has_files=instance.files.enabled
+            )
         else:
             obj = self._access_obj_class()
 
@@ -216,11 +218,11 @@ class RecordAccessField(SystemField):
             record["access"] = obj.dump()
 
     def post_dump(self, record, data, dumper=None):
-        """Called before a record is dumped."""
+        """Called after a record is dumped."""
         if data.get("access") and isinstance(data.get("access"), dict):
             data["access"]["status"] = record.access.status.value
 
     def pre_load(self, data, loader=None):
-        """Called before a record is dumped."""
+        """Called before a record is loaded."""
         if data.get("access") and isinstance(data.get("access"), dict):
             data["access"].pop("status", None)

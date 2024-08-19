@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2022 CERN.
+# Copyright (C) 2022-2024 CERN.
 # Copyright (C) 2023 Graz University of Technology.
 #
 # Invenio-RDM-Records is free software; you can redistribute it and/or modify
@@ -10,13 +10,10 @@
 
 from flask import current_app
 from invenio_drafts_resources.services.records import RecordService
+from invenio_drafts_resources.services.records.uow import ParentRecordCommitOp
 from invenio_i18n import lazy_gettext as _
 from invenio_notifications.services.uow import NotificationOp
-from invenio_records_resources.services.uow import (
-    RecordCommitOp,
-    RecordIndexOp,
-    unit_of_work,
-)
+from invenio_records_resources.services.uow import RecordIndexOp, unit_of_work
 from invenio_requests import current_request_type_registry, current_requests_service
 from invenio_requests.resolvers.registry import ResolverRegistry
 from marshmallow import ValidationError
@@ -86,7 +83,7 @@ class ReviewService(RecordService):
 
         # Set the request on the record and commit the record
         record.parent.review = request_item._request
-        uow.register(RecordCommitOp(record.parent))
+        uow.register(ParentRecordCommitOp(record.parent))
 
         return request_item
 
@@ -147,7 +144,7 @@ class ReviewService(RecordService):
             current_requests_service.delete(identity, draft.parent.review.id, uow=uow)
         # Unset on record
         draft.parent.review = None
-        uow.register(RecordCommitOp(draft.parent))
+        uow.register(ParentRecordCommitOp(draft.parent))
         uow.register(RecordIndexOp(draft, indexer=self.indexer))
         return True
 
@@ -185,7 +182,8 @@ class ReviewService(RecordService):
         # in the review systemfield, the review should be set with the updated
         # request object
         draft.parent.review = request
-        uow.register(RecordCommitOp(draft.parent))
+        uow.register(ParentRecordCommitOp(draft.parent))
+        uow.register(RecordIndexOp(draft, indexer=self.indexer))
 
         if not require_review:
             request_item = current_rdm_records.community_inclusion_service.include(
@@ -195,9 +193,8 @@ class ReviewService(RecordService):
         uow.register(
             NotificationOp(
                 CommunityInclusionSubmittedNotificationBuilder.build(
-                    request_item._request
+                    request_item._request,
                 )
             )
         )
-        uow.register(RecordIndexOp(draft, indexer=self.indexer))
         return request_item

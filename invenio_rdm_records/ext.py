@@ -1,43 +1,36 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2019-2023 CERN.
+# Copyright (C) 2019-2024 CERN.
 # Copyright (C) 2019-2021 Northwestern University.
 # Copyright (C) 2022 Universität Hamburg.
-# Copyright (C) 2023 Graz University of Technology.
+# Copyright (C) 2023-2024 Graz University of Technology.
+# Copyright (C) 2023 TU Wien.
 #
 # Invenio-RDM-Records is free software; you can redistribute it and/or modify
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """DataCite-based data model for Invenio."""
+from flask import Blueprint
 from flask_iiif import IIIF
 from flask_principal import identity_loaded
 from invenio_records_resources.resources.files import FileResource
-from invenio_records_resources.services import FileService
-
-from invenio_rdm_records.oaiserver.resources.config import (
-    OAIPMHServerResourceConfig,
-)
-from invenio_rdm_records.oaiserver.resources.resources import (
-    OAIPMHServerResource,
-)
-from invenio_rdm_records.oaiserver.services.config import (
-    OAIPMHServerServiceConfig,
-)
-from invenio_rdm_records.oaiserver.services.services import OAIPMHServerService
-from invenio_rdm_records.services.communities.service import (
-    RecordCommunitiesService,
-)
-from invenio_rdm_records.services.community_inclusion.service import (
-    CommunityInclusionService,
-)
 
 from . import config
+from .oaiserver.resources.config import OAIPMHServerResourceConfig
+from .oaiserver.resources.resources import OAIPMHServerResource
+from .oaiserver.services.config import OAIPMHServerServiceConfig
+from .oaiserver.services.services import OAIPMHServerService
 from .resources import (
     IIIFResource,
     IIIFResourceConfig,
     RDMCommunityRecordsResource,
     RDMCommunityRecordsResourceConfig,
     RDMDraftFilesResourceConfig,
+    RDMGrantGroupAccessResourceConfig,
+    RDMGrantsAccessResource,
+    RDMGrantUserAccessResourceConfig,
+    RDMParentGrantsResource,
+    RDMParentGrantsResourceConfig,
     RDMParentRecordLinksResource,
     RDMParentRecordLinksResourceConfig,
     RDMRecordCommunitiesResourceConfig,
@@ -45,6 +38,10 @@ from .resources import (
     RDMRecordRequestsResourceConfig,
     RDMRecordResource,
     RDMRecordResourceConfig,
+)
+from .resources.config import (
+    RDMDraftMediaFilesResourceConfig,
+    RDMRecordMediaFilesResourceConfig,
 )
 from .resources.resources import (
     RDMRecordCommunitiesResource,
@@ -60,9 +57,17 @@ from .services import (
     RDMRecordRequestsConfig,
     RDMRecordService,
     RDMRecordServiceConfig,
+    RecordAccessService,
     RecordRequestsService,
-    SecretLinkService,
 )
+from .services.communities.service import RecordCommunitiesService
+from .services.community_inclusion.service import CommunityInclusionService
+from .services.config import (
+    RDMMediaFileDraftServiceConfig,
+    RDMMediaFileRecordServiceConfig,
+    RDMRecordMediaFilesServiceConfig,
+)
+from .services.files import RDMFileService
 from .services.pids import PIDManager, PIDsService
 from .services.review.service import ReviewService
 from .utils import verify_token
@@ -73,8 +78,6 @@ def on_identity_loaded(_, identity):
     """Add secret link token or resource access token need to the freshly loaded Identity."""
     verify_token(identity)
 
-
-from flask import Blueprint
 
 blueprint = Blueprint(
     "invenio_rdm_records",
@@ -117,6 +120,8 @@ class InvenioRDMRecords(object):
                 k in supported_configurations
                 or k.startswith("RDM_")
                 or k.startswith("DATACITE_")
+                # TODO: This can likely be moved to a separate module
+                or k.startswith("IIIF_TILES_")
             ):
                 app.config.setdefault(k, getattr(config, k))
 
@@ -131,8 +136,13 @@ class InvenioRDMRecords(object):
 
         class ServiceConfigs:
             record = RDMRecordServiceConfig.build(app)
+            record_with_media_files = RDMRecordMediaFilesServiceConfig.build(
+                app
+            )
             file = RDMFileRecordServiceConfig.build(app)
             file_draft = RDMFileDraftServiceConfig.build(app)
+            media_file = RDMMediaFileRecordServiceConfig.build(app)
+            media_file_draft = RDMMediaFileDraftServiceConfig.build(app)
             oaipmh_server = OAIPMHServerServiceConfig
             record_communities = RDMRecordCommunitiesConfig.build(app)
             community_records = RDMCommunityRecordsConfig.build(app)
@@ -147,11 +157,20 @@ class InvenioRDMRecords(object):
         # Services
         self.records_service = RDMRecordService(
             service_configs.record,
-            files_service=FileService(service_configs.file),
-            draft_files_service=FileService(service_configs.file_draft),
-            secret_links_service=SecretLinkService(service_configs.record),
+            files_service=RDMFileService(service_configs.file),
+            draft_files_service=RDMFileService(service_configs.file_draft),
+            access_service=RecordAccessService(service_configs.record),
             pids_service=PIDsService(service_configs.record, PIDManager),
             review_service=ReviewService(service_configs.record),
+        )
+
+        self.records_media_files_service = RDMRecordService(
+            service_configs.record_with_media_files,
+            files_service=RDMFileService(service_configs.media_file),
+            draft_files_service=RDMFileService(
+                service_configs.media_file_draft
+            ),
+            pids_service=PIDsService(service_configs.record, PIDManager),
         )
 
         self.iiif_service = IIIFService(
@@ -194,10 +213,36 @@ class InvenioRDMRecords(object):
             config=RDMDraftFilesResourceConfig.build(app),
         )
 
+        self.record_media_files_resource = FileResource(
+            service=self.records_media_files_service.files,
+            config=RDMRecordMediaFilesResourceConfig.build(app),
+        )
+
+        # Draft files resource
+        self.draft_media_files_resource = FileResource(
+            service=self.records_media_files_service.draft_files,
+            config=RDMDraftMediaFilesResourceConfig.build(app),
+        )
+
         # Parent Records
         self.parent_record_links_resource = RDMParentRecordLinksResource(
             service=self.records_service,
             config=RDMParentRecordLinksResourceConfig.build(app),
+        )
+
+        self.parent_grants_resource = RDMParentGrantsResource(
+            service=self.records_service,
+            config=RDMParentGrantsResourceConfig.build(app),
+        )
+
+        self.grant_user_access_resource = RDMGrantsAccessResource(
+            service=self.records_service,
+            config=RDMGrantUserAccessResourceConfig.build(app),
+        )
+
+        self.grant_group_access_resource = RDMGrantsAccessResource(
+            service=self.records_service,
+            config=RDMGrantGroupAccessResourceConfig.build(app),
         )
 
         # Record's communities
@@ -240,3 +285,50 @@ class InvenioRDMRecords(object):
         for config_item in datacite_config_items:
             if config_item in app.config:
                 app.config[config_item] = str(app.config[config_item])
+
+
+def finalize_app(app):
+    """Finalize app.
+
+    NOTE: replace former @record_once decorator
+    """
+    init(app)
+
+
+def api_finalize_app(app):
+    """Finalize app for api.
+
+    NOTE: replace former @record_once decorator
+    """
+    init(app)
+
+
+def init(app):
+    """Init app."""
+    # Register services - cannot be done in extension because
+    # Invenio-Records-Resources might not have been initialized.
+    sregistry = app.extensions["invenio-records-resources"].registry
+    ext = app.extensions["invenio-rdm-records"]
+    sregistry.register(ext.records_service, service_id="records")
+    sregistry.register(ext.records_service.files, service_id="files")
+    sregistry.register(
+        ext.records_service.draft_files, service_id="draft-files"
+    )
+    sregistry.register(
+        ext.records_media_files_service, service_id="record-media-files"
+    )
+    sregistry.register(
+        ext.records_media_files_service.files, service_id="media-files"
+    )
+    sregistry.register(
+        ext.records_media_files_service.draft_files,
+        service_id="draft-media-files",
+    )
+    sregistry.register(ext.oaipmh_server_service, service_id="oaipmh-server")
+    sregistry.register(ext.iiif_service, service_id="rdm-iiif")
+    # Register indexers
+    iregistry = app.extensions["invenio-indexer"].registry
+    iregistry.register(ext.records_service.indexer, indexer_id="records")
+    iregistry.register(
+        ext.records_service.draft_indexer, indexer_id="records-drafts"
+    )

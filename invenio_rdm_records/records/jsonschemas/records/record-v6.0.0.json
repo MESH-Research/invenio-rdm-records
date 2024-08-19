@@ -106,21 +106,21 @@
           }
         },
         "dates": {
-          "description": "Date or date interval.",
+          "description": "Date, datetime or date interval.",
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
               "date": {
-                "description": "Date or date interval in EDTF level 0 format",
+                "description": "Date, datetime or date interval in EDTF level 0 format",
                 "type": "string"
               },
               "type": {
                 "$ref": "local://records/definitions-v2.0.0.json#/date_type"
               },
               "description": {
-                "description": "Description of the date or date interval e.g. 'Accepted' or 'Available' (CV).",
+                "description": "Description of the date, datetime or date interval e.g. 'Accepted' or 'Available' (CV).",
                 "type": "string"
               }
             }
@@ -131,8 +131,7 @@
           "type": "array",
           "items": {
             "$ref": "local://records/definitions-v2.0.0.json#/language"
-          },
-          "uniqueItems": true
+          }
         },
         "identifiers": {
           "description": "Alternate identifiers for the record.",
@@ -144,7 +143,6 @@
         },
         "related_identifiers": {
           "type": "array",
-          "uniqueItems": true,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -352,24 +350,32 @@
     },
     "tombstone": {
       "type": "object",
-      "description": "Tombstone for the record.",
+      "description": "Tombstone information for the record.",
       "additionalProperties": false,
       "properties": {
-        "reason": {
-          "type": "string",
-          "description": "Reason for removal."
+        "removal_reason": {
+          "$ref": "local://records/definitions-v2.0.0.json#/removal_reason",
+          "description": "Reason for record removal."
         },
-        "category": {
+        "note": {
           "type": "string",
-          "description": "Category for the removal."
+          "description": "Public note about the removal."
         },
         "removed_by": {
           "$ref": "local://records/definitions-v2.0.0.json#/agent"
         },
-        "timestamp": {
+        "removal_date": {
           "type": "string",
           "description": "ISO8601 formatted timestamp in UTC.",
           "format": "date-time"
+        },
+        "citation_text": {
+          "type": "string",
+          "description": "The record citation text to be displayed on the tombstone page."
+        },
+        "is_visible": {
+          "type": "boolean",
+          "description": "Whether or not the tombstone page is publicly visible."
         }
       }
     },
@@ -439,6 +445,9 @@
       }
     },
     "files": {
+      "$ref": "local://definitions-v2.0.0.json#/files-simple"
+    },
+    "media_files": {
       "$ref": "local://definitions-v2.0.0.json#/files-simple"
     },
     "notes": {

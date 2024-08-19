@@ -15,7 +15,10 @@ import pytest
 from flask_principal import AnonymousIdentity, Identity, UserNeed
 from invenio_access.permissions import any_user, authenticated_user
 from invenio_db import db
-from invenio_records_resources.services.errors import PermissionDeniedError
+from invenio_records_resources.services.errors import (
+    PermissionDeniedError,
+    RecordPermissionDeniedError,
+)
 from marshmallow.exceptions import ValidationError
 
 from invenio_rdm_records.proxies import current_rdm_records
@@ -62,7 +65,7 @@ def test_invalid_level(service, restricted_record, identity_simple):
     """Test invalid permission level."""
     record = restricted_record
     with pytest.raises(ValidationError):
-        service.secret_links.create(
+        service.access.create_secret_link(
             identity_simple, record.id, {"permission": "invalid"}
         )
 
@@ -70,13 +73,13 @@ def test_invalid_level(service, restricted_record, identity_simple):
 def test_permission_levels(service, restricted_record, identity_simple, client):
     """Test invalid permission level."""
     id_ = restricted_record.id
-    view_link = service.secret_links.create(
+    view_link = service.access.create_secret_link(
         identity_simple, id_, {"permission": "view"}
     )
-    preview_link = service.secret_links.create(
+    preview_link = service.access.create_secret_link(
         identity_simple, id_, {"permission": "preview"}
     )
-    edit_link = service.secret_links.create(
+    edit_link = service.access.create_secret_link(
         identity_simple, id_, {"permission": "edit"}
     )
 
@@ -85,7 +88,7 @@ def test_permission_levels(service, restricted_record, identity_simple, client):
     anon.provides.add(any_user)
 
     # Deny anonymous to read restricted record and draft
-    pytest.raises(PermissionDeniedError, service.read, anon, id_)
+    pytest.raises(RecordPermissionDeniedError, service.read, anon, id_)
     pytest.raises(PermissionDeniedError, service.files.list_files, anon, id_)
     pytest.raises(PermissionDeniedError, service.read_draft, anon, id_)
     with pytest.raises(PermissionDeniedError):
@@ -150,15 +153,15 @@ def test_permission_levels(service, restricted_record, identity_simple, client):
 
     # Deny user with edit link to share the links
     with pytest.raises(PermissionDeniedError):
-        service.secret_links.create(i, id_, {})
+        service.access.create_secret_link(i, id_, {})
     with pytest.raises(PermissionDeniedError):
-        service.secret_links.read_all(i, id_)
+        service.access.read_all_secret_links(i, id_)
     with pytest.raises(PermissionDeniedError):
-        service.secret_links.read(i, id_, edit_link.id)
+        service.access.read_secret_link(i, id_, edit_link.id)
     with pytest.raises(PermissionDeniedError):
-        service.secret_links.update(i, id_, edit_link.id, {})
+        service.access.update_secret_link(i, id_, edit_link.id, {})
     with pytest.raises(PermissionDeniedError):
-        service.secret_links.delete(i, id_, edit_link.id)
+        service.access.delete_secret_link(i, id_, edit_link.id)
 
     # Allow user with edit link to update, delete, edit, publish
     draft = service.read_draft(i, id_)

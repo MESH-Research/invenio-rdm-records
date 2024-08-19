@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2020-2022 CERN.
+# Copyright (C) 2020-2024 CERN.
 # Copyright (C) 2020-2021 Northwestern University.
 # Copyright (C) 2022 Universität Hamburg.
 # Copyright (C) 2023 Graz University of Technology.
@@ -9,11 +9,11 @@
 # it under the terms of the MIT License; see LICENSE file for more details.
 
 """Resources configuration."""
+from copy import deepcopy
 
 import marshmallow as ma
 from citeproc_styles import StyleNotFoundError
 from flask_resources import (
-    HTTPJSONException,
     JSONDeserializer,
     JSONSerializer,
     RequestBodyParser,
@@ -27,12 +27,17 @@ from invenio_communities.communities.resources.config import community_error_han
 from invenio_drafts_resources.resources import RecordResourceConfig
 from invenio_i18n import lazy_gettext as _
 from invenio_records.systemfields.relations import InvalidRelationValue
+from invenio_records_resources.resources.errors import ErrorHandlersMixin
 from invenio_records_resources.resources.files import FileResourceConfig
+from invenio_records_resources.resources.records.headers import etag_headers
 from invenio_records_resources.services.base.config import ConfiguratorMixin, FromConfig
 from invenio_requests.resources.requests.config import RequestSearchRequestArgsSchema
 
 from ..services.errors import (
+    AccessRequestExistsError,
+    GrantExistsError,
     InvalidAccessRestrictions,
+    RecordDeletedException,
     ReviewExistsError,
     ReviewNotFoundError,
     ReviewStateError,
@@ -41,15 +46,19 @@ from ..services.errors import (
 from .args import RDMSearchRequestArgsSchema
 from .deserializers import ROCrateJSONDeserializer
 from .deserializers.errors import DeserializerError
-from .errors import HTTPJSONValidationWithMessageAsListException
+from .errors import HTTPJSONException, HTTPJSONValidationWithMessageAsListException
 from .serializers import (
+    BibtexSerializer,
     CSLJSONSerializer,
+    CSVRecordSerializer,
     DataCite43JSONSerializer,
     DataCite43XMLSerializer,
     DCATSerializer,
     DublinCoreXMLSerializer,
+    FAIRSignpostingProfileLvl2Serializer,
     GeoJSONSerializer,
     MARCXMLSerializer,
+    SchemaorgJSONLDSerializer,
     StringCitationSerializer,
     UIJSONSerializer,
 )
@@ -65,22 +74,62 @@ def csl_url_args_retriever():
 #
 # Response handlers
 #
+def _bibliography_headers(obj_or_list, code, many=False):
+    """Override content type for 'text/x-bibliography'."""
+    _etag_headers = etag_headers(obj_or_list, code, many=False)
+    _etag_headers["content-type"] = "text/plain"
+    return _etag_headers
+
+
 record_serializers = {
-    "application/json": ResponseHandler(JSONSerializer()),
-    "application/marcxml+xml": ResponseHandler(MARCXMLSerializer()),
-    "application/vnd.inveniordm.v1+json": ResponseHandler(UIJSONSerializer()),
-    "application/vnd.citationstyles.csl+json": ResponseHandler(CSLJSONSerializer()),
-    "application/vnd.datacite.datacite+json": ResponseHandler(
-        DataCite43JSONSerializer()
+    "application/json": ResponseHandler(JSONSerializer(), headers=etag_headers),
+    "application/ld+json": ResponseHandler(SchemaorgJSONLDSerializer()),
+    "application/vnd.inveniordm.v1.full+csv": ResponseHandler(CSVRecordSerializer()),
+    "application/vnd.inveniordm.v1.simple+csv": ResponseHandler(
+        CSVRecordSerializer(
+            csv_included_fields=[
+                "id",
+                "created",
+                "pids.doi.identifier",
+                "metadata.title",
+                "metadata.description",
+                "metadata.resource_type.title.en",
+                "metadata.publication_date",
+                "metadata.creators.person_or_org.type",
+                "metadata.creators.person_or_org.name",
+                "metadata.rights.id",
+            ],
+            collapse_lists=True,
+        )
     ),
-    "application/vnd.geo+json": ResponseHandler(GeoJSONSerializer()),
-    "application/vnd.datacite.datacite+xml": ResponseHandler(DataCite43XMLSerializer()),
-    "application/x-dc+xml": ResponseHandler(DublinCoreXMLSerializer()),
+    "application/marcxml+xml": ResponseHandler(
+        MARCXMLSerializer(), headers=etag_headers
+    ),
+    "application/vnd.inveniordm.v1+json": ResponseHandler(
+        UIJSONSerializer(), headers=etag_headers
+    ),
+    "application/vnd.citationstyles.csl+json": ResponseHandler(
+        CSLJSONSerializer(), headers=etag_headers
+    ),
+    "application/vnd.datacite.datacite+json": ResponseHandler(
+        DataCite43JSONSerializer(), headers=etag_headers
+    ),
+    "application/vnd.geo+json": ResponseHandler(
+        GeoJSONSerializer(), headers=etag_headers
+    ),
+    "application/vnd.datacite.datacite+xml": ResponseHandler(
+        DataCite43XMLSerializer(), headers=etag_headers
+    ),
+    "application/x-dc+xml": ResponseHandler(
+        DublinCoreXMLSerializer(), headers=etag_headers
+    ),
     "text/x-bibliography": ResponseHandler(
         StringCitationSerializer(url_args_retriever=csl_url_args_retriever),
-        headers={"content-type": "text/plain"},
+        headers=_bibliography_headers,
     ),
-    "application/dcat+xml": ResponseHandler(DCATSerializer()),
+    "application/x-bibtex": ResponseHandler(BibtexSerializer(), headers=etag_headers),
+    "application/dcat+xml": ResponseHandler(DCATSerializer(), headers=etag_headers),
+    "application/linkset+json": ResponseHandler(FAIRSignpostingProfileLvl2Serializer()),
 }
 
 
@@ -100,6 +149,13 @@ class RDMRecordResourceConfig(RecordResourceConfig, ConfiguratorMixin):
     # Review
     routes["item-review"] = "/<pid_value>/draft/review"
     routes["item-actions-review"] = "/<pid_value>/draft/actions/submit-review"
+    # Access requests
+    routes["record-access-request"] = "/<pid_value>/access/request"
+    routes["access-request-settings"] = "/<pid_value>/access"
+    routes["delete-record"] = "/<pid_value>/delete"
+    routes["restore-record"] = "/<pid_value>/restore"
+    routes["set-record-quota"] = "/<pid_value>/quota"
+    routes["set-user-quota"] = "/users/<pid_value>/quota"
 
     request_view_args = {
         "pid_value": ma.fields.Str(),
@@ -109,6 +165,7 @@ class RDMRecordResourceConfig(RecordResourceConfig, ConfiguratorMixin):
     request_read_args = {
         "style": ma.fields.Str(),
         "locale": ma.fields.Str(),
+        "include_deleted": ma.fields.Bool(),
     }
 
     request_body_parsers = {
@@ -118,9 +175,14 @@ class RDMRecordResourceConfig(RecordResourceConfig, ConfiguratorMixin):
         ),
     }
 
-    request_search_args = RDMSearchRequestArgsSchema
+    request_search_args = FromConfig(
+        "RDM_SEARCH_ARGS_SCHEMA", default=RDMSearchRequestArgsSchema
+    )
 
-    response_handlers = record_serializers
+    response_handlers = FromConfig(
+        "RDM_RECORDS_SERIALIZERS",
+        default=record_serializers,
+    )
 
     error_handlers = {
         DeserializerError: create_error_handler(
@@ -168,6 +230,23 @@ class RDMRecordResourceConfig(RecordResourceConfig, ConfiguratorMixin):
         ValidationErrorWithMessageAsList: create_error_handler(
             lambda e: HTTPJSONValidationWithMessageAsListException(e)
         ),
+        AccessRequestExistsError: create_error_handler(
+            lambda e: HTTPJSONException(
+                code=400,
+                description=e.description,
+            )
+        ),
+        RecordDeletedException: create_error_handler(
+            lambda e: (
+                HTTPJSONException(code=404, description=_("Record not found"))
+                if not e.record.tombstone.is_visible
+                else HTTPJSONException(
+                    code=410,
+                    description=_("Record deleted"),
+                    tombstone=e.record.tombstone.dump(),
+                )
+            )
+        ),
     }
 
 
@@ -182,6 +261,21 @@ class RDMRecordFilesResourceConfig(FileResourceConfig, ConfiguratorMixin):
     blueprint_name = "record_files"
     url_prefix = "/records/<pid_value>"
 
+    error_handlers = {
+        **ErrorHandlersMixin.error_handlers,
+        RecordDeletedException: create_error_handler(
+            lambda e: (
+                HTTPJSONException(code=404, description=_("Record not found"))
+                if not e.record.tombstone.is_visible
+                else HTTPJSONException(
+                    code=410,
+                    description=_("Record deleted"),
+                    tombstone=e.record.tombstone.dump(),
+                )
+            )
+        ),
+    }
+
 
 #
 # Draft files
@@ -194,22 +288,95 @@ class RDMDraftFilesResourceConfig(FileResourceConfig, ConfiguratorMixin):
     url_prefix = "/records/<pid_value>/draft"
 
 
-#
-# Parent Record Links
-#
-record_links_error_handlers = RecordResourceConfig.error_handlers.copy()
+class RDMRecordMediaFilesResourceConfig(FileResourceConfig, ConfiguratorMixin):
+    """Bibliographic record files resource config."""
 
+    allow_upload = False
+    allow_archive_download = FromConfig("RDM_ARCHIVE_DOWNLOAD_ENABLED", True)
+    blueprint_name = "record_media_files"
+    url_prefix = "/records/<pid_value>"
+    routes = {
+        "list": "/media-files",
+        "item": "/media-files/<key>",
+        "item-content": "/media-files/<key>/content",
+        "item-commit": "/media-files/<key>/commit",
+        "list-archive": "/media-files-archive",
+    }
 
-record_links_error_handlers.update(
-    {
-        LookupError: create_error_handler(
-            HTTPJSONException(
-                code=404,
-                description="No secret link found with the given ID.",
+    error_handlers = {
+        **ErrorHandlersMixin.error_handlers,
+        RecordDeletedException: create_error_handler(
+            lambda e: (
+                HTTPJSONException(code=404, description=_("Record not found"))
+                if not e.record.tombstone.is_visible
+                else HTTPJSONException(
+                    code=410,
+                    description=_("Record deleted"),
+                    tombstone=e.record.tombstone.dump(),
+                )
             )
         ),
     }
-)
+
+
+#
+# Draft files
+#
+class RDMDraftMediaFilesResourceConfig(FileResourceConfig, ConfiguratorMixin):
+    """Bibliographic record files resource config."""
+
+    allow_archive_download = FromConfig("RDM_ARCHIVE_DOWNLOAD_ENABLED", True)
+    blueprint_name = "draft_media_files"
+    url_prefix = "/records/<pid_value>/draft"
+
+    routes = {
+        "list": "/media-files",
+        "item": "/media-files/<key>",
+        "item-content": "/media-files/<key>/content",
+        "item-commit": "/media-files/<key>/commit",
+        "list-archive": "/media-files-archive",
+    }
+
+
+#
+# Parent Record Links
+#
+record_links_error_handlers = {
+    **deepcopy(RecordResourceConfig.error_handlers),
+    LookupError: create_error_handler(
+        HTTPJSONException(
+            code=404,
+            description=_("No secret link found with the given ID."),
+        )
+    ),
+}
+
+grants_error_handlers = {
+    **deepcopy(RecordResourceConfig.error_handlers),
+    LookupError: create_error_handler(
+        HTTPJSONException(code=404, description=_("No grant found with the given ID."))
+    ),
+    GrantExistsError: create_error_handler(
+        lambda e: HTTPJSONException(
+            code=400,
+            description=e.description,
+        )
+    ),
+}
+
+user_access_error_handlers = {
+    **deepcopy(RecordResourceConfig.error_handlers),
+    LookupError: create_error_handler(
+        HTTPJSONException(code=404, description=_("No grant found by given user id."))
+    ),
+}
+
+group_access_error_handlers = {
+    **deepcopy(RecordResourceConfig.error_handlers),
+    LookupError: create_error_handler(
+        HTTPJSONException(code=404, description=_("No grant found by given group id."))
+    ),
+}
 
 
 #
@@ -218,7 +385,7 @@ record_links_error_handlers.update(
 class RDMParentRecordLinksResourceConfig(RecordResourceConfig, ConfiguratorMixin):
     """User records resource configuration."""
 
-    blueprint_name = "record_access"
+    blueprint_name = "record_links"
 
     url_prefix = "/records/<pid_value>/access"
 
@@ -234,9 +401,103 @@ class RDMParentRecordLinksResourceConfig(RecordResourceConfig, ConfiguratorMixin
         "link_id": ma.fields.Str(),
     }
 
-    response_handlers = {"application/json": ResponseHandler(JSONSerializer())}
+    response_handlers = {
+        "application/json": ResponseHandler(JSONSerializer(), headers=etag_headers)
+    }
 
     error_handlers = record_links_error_handlers
+
+
+class RDMParentGrantsResourceConfig(RecordResourceConfig, ConfiguratorMixin):
+    """Record grants resource configuration."""
+
+    blueprint_name = "record_grants"
+
+    url_prefix = "/records/<pid_value>/access"
+
+    routes = {
+        "list": "/grants",
+        "item": "/grants/<grant_id>",
+    }
+
+    links_config = {}
+
+    # NOTE: the `grant_id` is currently the index in the list of `parent.access.grants`
+    #       which should only change when the data model changes, and should thus
+    #       be good enough for our purposes
+    request_view_args = {
+        "pid_value": ma.fields.Str(),
+        "grant_id": ma.fields.Int(),
+    }
+    request_extra_args = {"expand": ma.fields.Bool()}
+
+    response_handlers = {
+        "application/json": ResponseHandler(JSONSerializer(), headers=etag_headers)
+    }
+
+    error_handlers = grants_error_handlers
+
+
+class RDMGrantUserAccessResourceConfig(RecordResourceConfig, ConfiguratorMixin):
+    """Record grants user access resource configuration."""
+
+    blueprint_name = "record_user_access"
+
+    url_prefix = "/records/<pid_value>/access"
+
+    routes = {
+        "item": "/users/<subject_id>",
+        "list": "/users",
+    }
+
+    links_config = {}
+
+    request_view_args = {
+        "pid_value": ma.fields.Str(),
+        "subject_id": ma.fields.Str(),  # user id
+    }
+
+    grant_subject_type = "user"
+
+    response_handlers = {
+        "application/vnd.inveniordm.v1+json": RecordResourceConfig.response_handlers[
+            "application/json"
+        ],
+        **deepcopy(RecordResourceConfig.response_handlers),
+    }
+
+    error_handlers = user_access_error_handlers
+
+
+class RDMGrantGroupAccessResourceConfig(RecordResourceConfig, ConfiguratorMixin):
+    """Record grants group access resource configuration."""
+
+    blueprint_name = "record_group_access"
+
+    url_prefix = "/records/<pid_value>/access"
+
+    routes = {
+        "item": "/groups/<subject_id>",
+        "list": "/groups",
+    }
+
+    links_config = {}
+
+    request_view_args = {
+        "pid_value": ma.fields.Str(),
+        "subject_id": ma.fields.Str(),  # group id
+    }
+
+    grant_subject_type = "role"
+
+    response_handlers = {
+        "application/vnd.inveniordm.v1+json": RecordResourceConfig.response_handlers[
+            "application/json"
+        ],
+        **deepcopy(RecordResourceConfig.response_handlers),
+    }
+
+    error_handlers = group_access_error_handlers
 
 
 #
@@ -249,7 +510,10 @@ class RDMCommunityRecordsResourceConfig(RecordResourceConfig, ConfiguratorMixin)
     url_prefix = "/communities"
     routes = {"list": "/<pid_value>/records"}
 
-    response_handlers = record_serializers
+    response_handlers = FromConfig(
+        "RDM_RECORDS_SERIALIZERS",
+        default=record_serializers,
+    )
 
 
 class RDMRecordCommunitiesResourceConfig(CommunityResourceConfig, ConfiguratorMixin):
@@ -285,55 +549,4 @@ class RDMRecordRequestsResourceConfig(ResourceConfig, ConfiguratorMixin):
 
     request_extra_args = {
         "expand": ma.fields.Boolean(),
-    }
-
-
-#
-# IIIF
-#
-class IIIFResourceConfig(ResourceConfig, ConfiguratorMixin):
-    """IIIF resource configuration."""
-
-    blueprint_name = "iiif"
-
-    url_prefix = "/iiif"
-
-    routes = {
-        "manifest": "/<uuid>/manifest",
-        "sequence": "/<uuid>/sequence/default",
-        "canvas": "/<uuid>/canvas/<file_name>",
-        "image_base": "/<uuid>",
-        "image_info": "/<uuid>/info.json",
-        "image_api": "/<uuid>/<region>/<size>/<rotation>/<quality>.<image_format>",
-    }
-
-    request_view_args = {
-        "uuid": ma.fields.Str(),
-        "file_name": ma.fields.Str(),
-        "region": ma.fields.Str(),
-        "size": ma.fields.Str(),
-        "rotation": ma.fields.Str(),
-        "quality": ma.fields.Str(),
-        "image_format": ma.fields.Str(),
-    }
-
-    request_read_args = {
-        "dl": ma.fields.Str(),
-    }
-
-    request_headers = {
-        "If-Modified-Since": ma.fields.DateTime(),
-    }
-
-    response_handler = {"application/json": ResponseHandler(JSONSerializer())}
-
-    supported_formats = {
-        "gif": "image/gif",
-        "jp2": "image/jp2",
-        "jpeg": "image/jpeg",
-        "jpg": "image/jpeg",
-        "pdf": "application/pdf",
-        "png": "image/png",
-        "tif": "image/tiff",
-        "tiff": "image/tiff",
     }

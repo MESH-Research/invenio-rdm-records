@@ -14,11 +14,6 @@ from invenio_records_resources.services.base import Link
 from invenio_records_resources.services.records.links import pagination_links
 from sqlalchemy import asc, desc
 
-from invenio_rdm_records.oaiserver.services.schema import (
-    OAIPMHMetadataFormat,
-    OAIPMHSetSchema,
-)
-
 from ..services.links import OAIPMHSetLink
 from ..services.permissions import OAIPMHServerPermissionPolicy
 from ..services.results import (
@@ -27,6 +22,7 @@ from ..services.results import (
     OAISetItem,
     OAISetList,
 )
+from .schema import OAIPMHMetadataFormat, OAIPMHSetSchema
 
 
 class SearchOptions:
@@ -112,5 +108,3 @@ class OAIPMHServerServiceConfig(ServiceConfig):
         ),
         "oai-identify": Link("{+ui}/oai2d?verb=Identify"),
     }
-
-    reserved_prefixes = {"community-"}

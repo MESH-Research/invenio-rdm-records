@@ -11,8 +11,10 @@ import re
 
 from flask import current_app
 from flask_sqlalchemy import Pagination
+from invenio_db import db
 from invenio_i18n import lazy_gettext as _
 from invenio_oaiserver.models import OAISet
+from invenio_oaiserver.percolator import _new_percolator
 from invenio_records_resources.services import Service
 from invenio_records_resources.services.base import LinksTemplate
 from invenio_records_resources.services.base.utils import map_search_params
@@ -23,22 +25,21 @@ from sqlalchemy import or_
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.sql import text
 
-from invenio_rdm_records.oaiserver.services.errors import (
+from .errors import (
     OAIPMHSetDoesNotExistError,
-    OAIPMHSetIDDoesNotExistError,
     OAIPMHSetNotEditable,
     OAIPMHSetSpecAlreadyExistsError,
 )
-from invenio_rdm_records.oaiserver.services.uow import OAISetCommitOp, OAISetDeleteOp
+from .uow import OAISetCommitOp, OAISetDeleteOp
 
 
 class OAIPMHServerService(Service):
     """OAI-PMH service."""
 
-    def __init__(self, config, extra_reserved_prefixes={}):
+    def __init__(self, config, extra_reserved_prefixes=None):
         """Init service with config."""
         super().__init__(config)
-        self.reserved_prefixes = config.reserved_prefixes.union(extra_reserved_prefixes)
+        self.extra_reserved_prefixes = extra_reserved_prefixes or {}
 
     @property
     def schema(self):
@@ -51,6 +52,12 @@ class OAIPMHServerService(Service):
         return LinksTemplate(
             self.config.links_item,
         )
+
+    @property
+    def reserved_prefixes(self):
+        """Get OAI-PMH set prefix from config."""
+        _reserved_prefixes = set([current_app.config["COMMUNITIES_OAI_SETS_PREFIX"]])
+        return _reserved_prefixes.union(self.extra_reserved_prefixes)
 
     def _get_one(self, raise_error=True, **kwargs):
         """Retrieve set based on provided arguments."""
@@ -229,3 +236,11 @@ class OAIPMHServerService(Service):
                 self, schema=self.config.metadata_format_schema
             ),
         )
+
+    def rebuild_index(self, identity):
+        """Rebuild OAI sets percolator index."""
+        entries = db.session.query(OAISet.spec, OAISet.search_pattern).yield_per(1000)
+        for spec, search_pattern in entries:
+            # Creates or updates the OAI set
+            _new_percolator(spec, search_pattern)
+        return True

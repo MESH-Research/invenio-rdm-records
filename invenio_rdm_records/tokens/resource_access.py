@@ -12,14 +12,24 @@ from datetime import datetime, timedelta
 import jwt
 from flask import current_app
 from invenio_oauth2server.models import Token
+from marshmallow import Schema, fields
 
 from .errors import (
     ExpiredTokenError,
     InvalidTokenError,
     InvalidTokenIDError,
     MissingTokenIDError,
+    TokenDecodeError,
 )
 from .scopes import tokens_generate_scope
+
+
+class SubjectSchema(Schema):
+    """Resource access token JWT subject schema."""
+
+    pid_value = fields.Str(data_key="record_id", required=True)
+    file_key = fields.Str(data_key="file", missing=None)
+    permission = fields.Str(data_key="access", missing=None)
 
 
 def validate_rat(token):
@@ -28,6 +38,8 @@ def validate_rat(token):
     try:
         headers = jwt.get_unverified_header(token)
         access_token_id = headers.get("kid")
+    except jwt.DecodeError:
+        raise TokenDecodeError()
     except jwt.InvalidTokenError:
         raise InvalidTokenError()
 
@@ -62,6 +74,8 @@ def validate_rat(token):
         if (issued_at + token_lifetime) < datetime.utcnow():
             raise ExpiredTokenError()
 
+    except jwt.DecodeError:
+        raise TokenDecodeError()
     except jwt.InvalidTokenError:
         raise InvalidTokenError()
 
