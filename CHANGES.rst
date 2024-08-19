@@ -11,6 +11,73 @@
 Changes
 =======
 
+Version v11.7.0 (released 2024-08-12)
+
+- resources: add vnd.inveniordm.v1+json http header
+- translation: update file paths for strings (UI)
+
+Version v11.6.0 (released 2024-08-07)
+
+- creatibutors: fix buttons order
+- permissions: change error handler for resolving pid permission denied
+- record inclusion: use system identity to accept inclusion request when can_include_directly
+- user_moderation: improve DB queries and use Celery tasks
+- fix: use index to distinguish type of record in results
+    * The problem with "is_published" is that drafts created from records will
+      not be recognised correctly.
+    * Using the index is a valid solution but it is not a nice implementation.
+- results: added support for drafts in the results list
+- fix(community): set branding
+    * The set branding didn't work at all. It didn't work for rebranding if
+      a default already exists and it didn't work if no branding exists at
+      all.
+    * The default property of the CommunitiesRelationManager needs a string.
+      It can't handle a dict.
+
+Version v11.5.0 (released 2024-07-22)
+
+- codemeta: added identifier to schema
+- signposting: generate 1 link context object for metadata
+- fix: abort on record deletion exception
+
+Version v11.4.0 (released 2024-07-15)
+
+- affiliations: update defaults to ror v2
+
+Version 11.3.1 (released 2024-07-12)
+
+- processors: fix tiles files iteration
+    * Creates a copy of the files list to be iterated since we might be
+      modifying the underlying dictionary while processing tiles.
+
+Version 11.3.0 (released 2024-07-12)
+
+* media-files: generate ptif and include in manifets
+* fix: pids required behavior
+    * The fix for the parent doi configuration
+      https://github.com/inveniosoftware/invenio-rdm-records/pull/1740 broke
+      the "required" parameter for the pid provider. Previously you could
+      have a pid provider that was active (shows up in the deposit form),
+      but not required (pid would only be minted if something was entered).
+      Because the check for "required" was removed, this stopped working.
+    * This correction enables the option of having external DOIs without
+      necessarily having to set one of them. This would not be possible with
+      the "is_enabled" configuration.
+* iiif: handle DecompressionBombError
+
+Version 11.2.0 (released 2024-07-05)
+
+- iiif: schema: only return images within size limit in manifest
+
+Version 11.1.0 (released 2024-07-04)
+
+- installation: upgrade invenio-drafts-resources
+
+Version 11.0.0 (released 2024-06-04)
+
+- installation: bump invenio-communities, invenio-vocabularies, invenio-drafts-resources and invenio-records-resources
+- installation: added invenio-jobs
+
 Version 10.7.1 (released 2024-05-31)
 
 - secret links: set csrf token for all requests with secret links,
@@ -32,7 +99,7 @@ Version 10.6.0 (released 2024-05-22)
 
 Version 10.5.0 (released 2024-05-21)
 
-- iiif: add PyVIPS support for PDF thumnbail rendering
+- iiif: add PyVIPS support for PDF thumbnail rendering
 
 Version 10.4.3 (released 2024-05-17)
 
