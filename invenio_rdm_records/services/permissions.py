@@ -302,9 +302,9 @@ class RDMRecordPermissionPolicy(RecordPermissionPolicy):
     # - Records/files are updated/deleted via drafts so we don't support
     #   using below actions.
     can_update = [Disable()]
-    can_create_files = [Disable()]
-    can_set_content_files = [Disable()]
-    can_commit_files = [Disable()]
+    can_create_files = [SystemProcess()]
+    can_set_content_files = [SystemProcess()]
+    can_commit_files = [SystemProcess()]
     can_update_files = [Disable()]
 
     # Used to hide at the moment the `parent.is_verified` field. It should be set to
@@ -322,11 +322,19 @@ class RDMRequestsPermissionPolicy(RequestPermissionPolicy):
 
     can_read = RequestPermissionPolicy.can_read + [guest_token]
     can_update = RequestPermissionPolicy.can_update + [guest_token]
-    can_action_submit = RequestPermissionPolicy.can_action_submit + [guest_token]
-    can_action_cancel = RequestPermissionPolicy.can_action_cancel + [guest_token]
+    can_action_submit = RequestPermissionPolicy.can_action_submit + [
+        guest_token
+    ]
+    can_action_cancel = RequestPermissionPolicy.can_action_cancel + [
+        guest_token
+    ]
     can_create_comment = can_read
-    can_update_comment = RequestPermissionPolicy.can_update_comment + [guest_token]
-    can_delete_comment = RequestPermissionPolicy.can_delete_comment + [guest_token]
+    can_update_comment = RequestPermissionPolicy.can_update_comment + [
+        guest_token
+    ]
+    can_delete_comment = RequestPermissionPolicy.can_delete_comment + [
+        guest_token
+    ]
 
     # manages GuessAccessRequest payload permissions
     can_manage_access_options = [
