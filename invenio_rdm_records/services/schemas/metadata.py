@@ -86,15 +86,11 @@ class PersonOrOrganizationSchema(Schema):
         required=True,
         validate=validate.OneOf(
             choices=NAMES,
-            error=_("Invalid value. Choose one of {NAMES}.").format(
-                NAMES=NAMES
-            ),
+            error=_("Invalid value. Choose one of {NAMES}.").format(NAMES=NAMES),
         ),
         error_messages={
             # [] needed to mirror error message above
-            "required": [
-                _("Invalid value. Choose one of {NAMES}.").format(NAMES=NAMES)
-            ]
+            "required": [_("Invalid value. Choose one of {NAMES}.").format(NAMES=NAMES)]
         },
     )
     name = SanitizedUnicode()
@@ -153,8 +149,7 @@ def validate_affiliations_data(data):
         return
     # avoid nesting
     seen_names = {
-        affiliation.get("name", affiliation.get("id"))
-        for affiliation in affiliations
+        affiliation.get("name", affiliation.get("id")) for affiliation in affiliations
     }
     if len(seen_names) != len(affiliations):
         # provide more specific info
@@ -367,13 +362,15 @@ class MetadataSchema(Schema):
     creators = fields.List(
         fields.Nested(CreatorSchema),
         required=True,
-        validate=validate.Length(
-            min=1, error=_("Missing data for required field.")
-        ),
+        validate=validate.Length(min=1, error=_("Missing data for required field.")),
     )
     title = SanitizedUnicode(
         required=True,
         validate=_not_blank(_("Title cannot be a blank string.")),
+    )
+    title = SanitizedUnicode(
+        required=True,
+        validate=validate._not_blank(_("Title cannot be a blank string.")),
     )
     additional_titles = fields.List(fields.Nested(TitleSchema))
     publisher = SanitizedUnicode()
@@ -385,21 +382,15 @@ class MetadataSchema(Schema):
     # alternate identifiers
     identifiers = IdentifierSet(
         fields.Nested(
-            partial(
-                IdentifierSchema, allowed_schemes=record_identifiers_schemes
-            )
+            partial(IdentifierSchema, allowed_schemes=record_identifiers_schemes)
         )
     )
     related_identifiers = fields.List(fields.Nested(RelatedIdentifierSchema))
     sizes = fields.List(
-        SanitizedUnicode(
-            validate=_not_blank(_("Size cannot be a blank string."))
-        )
+        SanitizedUnicode(validate=_not_blank(_("Size cannot be a blank string.")))
     )
     formats = fields.List(
-        SanitizedUnicode(
-            validate=_not_blank(_("Format cannot be a blank string."))
-        )
+        SanitizedUnicode(validate=_not_blank(_("Format cannot be a blank string.")))
     )
     version = SanitizedUnicode()
     rights = fields.List(fields.Nested(RightsSchema))
