@@ -147,6 +147,11 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         record = self.record_cls.pid.resolve(id_)
         self.require_permission(identity, "add_community", record=record)
 
+        # Run components
+        for component in self.components:
+            if hasattr(component, "add"):
+                component.add(identity, record=record, communities=communities, uow=uow)
+
         processed = []
         for community in communities:
             community_id = community["id"]
@@ -223,6 +228,14 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             raise_errors=True,
         )
         communities = valid_data["communities"]
+
+        # Run components
+        for component in self.components:
+            if hasattr(component, "remove"):
+                component.remove(
+                    identity, record=record, communities=communities, uow=uow
+                )
+
         processed = []
         for community in communities:
             community_id = community["id"]
@@ -371,6 +384,17 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         self.require_permission(identity, "manage", record=record)
         record.parent.communities.default = valid_data["default"]["id"]
 
+        # Run components
+        for component in self.components:
+            if hasattr(component, "set_default"):
+                component.set_default(
+                    identity,
+                    record=record,
+                    default_community_id=default_community_id,
+                    valid_data=valid_data,
+                    uow=uow,
+                )
+
         uow.register(
             ParentRecordCommitOp(
                 record.parent,
@@ -391,11 +415,25 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         """
         self.require_permission(identity, "bulk_add")
         errors = []
+
+        # Run components
+        # mutable set_default_flag allows components to modify the set_default value
+        set_default_flag = {"value": set_default}
+        for component in self.components:
+            if hasattr(component, "bulk_add"):
+                component.bulk_add(
+                    identity,
+                    community_id=community_id,
+                    record_ids=record_ids,
+                    set_default=set_default_flag,
+                    uow=uow,
+                )
+
         for record_id in record_ids:
             record = self.record_cls.pid.resolve(record_id)
             community = current_communities.service.record_cls.pid.resolve(community_id)
 
-            set_default = set_default or not record.parent.communities
+            set_default = set_default_flag["value"] or not record.parent.communities
             already_included = community.id in record.parent.communities
             if already_included:
                 errors.append(
