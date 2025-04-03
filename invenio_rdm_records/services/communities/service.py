@@ -147,6 +147,16 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         record = self.record_cls.pid.resolve(id_)
         self.require_permission(identity, "add_community", record=record)
 
+        # Run components
+        self.run_components(
+            "add_community", identity, record=record, communities=communities, uow=uow
+        )
+
+        # Run components
+        self.run_components(
+            "add_community", identity, record=record, communities=communities, uow=uow
+        )
+
         processed = []
         for community in communities:
             community_id = community["id"]
@@ -186,8 +196,9 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
 
         return processed, errors
 
-    def _remove(self, identity, community_id, record):
+    def _remove(self, identity, community, record, valid_data, errors, uow):
         """Remove a community from the record."""
+        community_id = community["id"]
         if community_id not in record.parent.communities.ids:
             raise RecordCommunityMissing(record.id, community_id)
 
@@ -195,7 +206,8 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             self.require_permission(
                 identity, "remove_community", record=record, community_id=community_id
             )
-            # By default, admin/superuser has permission to do everything, so PermissionDeniedError won't be raised for admin in any case
+            # By default, admin/superuser has permission to do everything,
+            # so PermissionDeniedError won't be raised for admin in any case
         except PermissionDeniedError as exc:
             # If permission is denied, determine which error to raise, based on config
             community_required = current_app.config["RDM_COMMUNITY_REQUIRED_TO_PUBLISH"]
@@ -206,7 +218,19 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
                 # If the config wasn't enabled, then raise the PermissionDeniedError
                 raise exc
 
-        # Default community is deleted when the exact same community is removed from the record
+        # Run components
+        self.run_components(
+            "remove_community",
+            identity,
+            record=record,
+            community=community,
+            valid_data=valid_data,
+            errors=errors,
+            uow=uow,
+        )
+
+        # Default community is deleted when the exact same community is
+        # removed from the record
         record.parent.communities.remove(community_id)
 
     @unit_of_work()
@@ -223,11 +247,12 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             raise_errors=True,
         )
         communities = valid_data["communities"]
+
         processed = []
         for community in communities:
             community_id = community["id"]
             try:
-                self._remove(identity, community_id, record)
+                self._remove(identity, community, record, valid_data, errors, uow)
                 processed.append({"community": community_id})
             except (
                 RecordCommunityMissing,
@@ -369,7 +394,18 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         )
         record = self.record_cls.pid.resolve(id_)
         self.require_permission(identity, "manage", record=record)
-        record.parent.communities.default = valid_data["default"]["id"]
+        default_community_id = valid_data.get("default").get("id") or None
+        record.parent.communities.default = default_community_id
+
+        # Run components
+        self.run_components(
+            "set_default",
+            identity,
+            record=record,
+            default_community_id=default_community_id,
+            valid_data=valid_data,
+            uow=uow,
+        )
 
         uow.register(
             ParentRecordCommitOp(
@@ -391,11 +427,23 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         """
         self.require_permission(identity, "bulk_add")
         errors = []
+
+        # Run components
+        # mutable set_default_flag allows components to modify the set_default value
+        set_default_flag = {"value": set_default}
+        self.run_components(
+            "bulk_add",
+            identity,
+            community_id=community_id,
+            record_ids=record_ids,
+            set_default=set_default_flag,
+            uow=uow,
+        )
+
         for record_id in record_ids:
             record = self.record_cls.pid.resolve(record_id)
             community = current_communities.service.record_cls.pid.resolve(community_id)
 
-            set_default = set_default or not record.parent.communities
             already_included = community.id in record.parent.communities
             if already_included:
                 errors.append(
@@ -416,6 +464,7 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             if parent_community and not already_in_parent:
                 record.parent.communities.add(parent_community, request=None)
 
+            set_default = set_default_flag["value"] or not record.parent.communities
             record.parent.communities.add(community, request=None, default=set_default)
 
             # Commit and bulk re-index everything
