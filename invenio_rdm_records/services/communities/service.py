@@ -233,7 +233,12 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         for component in self.components:
             if hasattr(component, "remove"):
                 component.remove(
-                    identity, record=record, communities=communities, uow=uow
+                    identity,
+                    record=record,
+                    communities=communities,
+                    valid_data=valid_data,
+                    errors=errors,
+                    uow=uow,
                 )
 
         processed = []
@@ -382,7 +387,8 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
         )
         record = self.record_cls.pid.resolve(id_)
         self.require_permission(identity, "manage", record=record)
-        record.parent.communities.default = valid_data["default"]["id"]
+        default_community_id = valid_data.get("default").get("id") or None
+        record.parent.communities.default = default_community_id
 
         # Run components
         for component in self.components:
