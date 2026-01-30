@@ -20,7 +20,7 @@ import {
   publish,
   reservePID,
   save,
-  submitReview,
+  submitReview as submitReviewAction,
 } from "../state/actions";
 import { scrollTop } from "../utils";
 
@@ -183,7 +183,7 @@ const mapDispatchToProps = (dispatch) => ({
   publishAction: (values, { removeSelectedCommunity = false }) =>
     dispatch(publish(values, { removeSelectedCommunity })),
   submitReview: (values, { reviewComment, directPublish }) =>
-    dispatch(submitReview(values, { reviewComment, directPublish })),
+    dispatch(submitReviewAction(values, { reviewComment, directPublish })),
   saveAction: (values) => dispatch(save(values)),
   previewAction: (values) => dispatch(preview(values)),
   deleteAction: (values, { isDiscardingVersion }) =>
