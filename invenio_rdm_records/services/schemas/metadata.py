@@ -61,6 +61,21 @@ def _not_blank(error_msg):
     return validate.Length(min=1, error=error_msg)
 
 
+def _validate_title_length(value):
+    """Validate title length using RDM_RECORDS_MAX_TITLE_LENGTH from config."""
+    max_len = current_app.config.get("RDM_RECORDS_MAX_TITLE_LENGTH", 260)
+    if len(value) < 1:
+        messages = [_("Title cannot be a blank string.")]
+        raise ValidationError(messages)
+    if len(value) > max_len:
+        messages = [
+            _("Title cannot be longer than {max_len} characters.").format(
+                max_len=max_len
+            )
+        ]
+        raise ValidationError(messages)
+
+
 def _valid_url(error_msg):
     """Returns a URL validation rule with custom error message."""
     return validate.URL(error=error_msg)
@@ -189,7 +204,7 @@ class ContributorSchema(Schema):
 class TitleSchema(Schema):
     """Schema for the additional title."""
 
-    title = SanitizedUnicode(required=True, validate=validate.Length(min=3))
+    title = SanitizedUnicode(required=True, validate=_validate_title_length)
     type = fields.Nested(VocabularySchema, required=True)
     lang = fields.Nested(VocabularySchema)
 
@@ -337,14 +352,12 @@ class LocationSchema(Schema):
             and not data.get("identifiers")
             and not data.get("description")
         ):
-            raise ValidationError(
-                {
-                    "locations": _(
-                        "At least one of ['geometry', 'place', \
+            raise ValidationError({
+                "locations": _(
+                    "At least one of ['geometry', 'place', \
                 identifiers', 'description'] must be present."
-                    )
-                }
-            )
+                )
+            })
 
 
 class FeatureSchema(Schema):
@@ -363,7 +376,7 @@ class MetadataSchema(Schema):
         required=True,
         validate=validate.Length(min=1, error=_("Missing data for required field.")),
     )
-    title = SanitizedUnicode(required=True, validate=validate.Length(min=3))
+    title = SanitizedUnicode(required=True, validate=_validate_title_length)
     additional_titles = fields.List(fields.Nested(TitleSchema))
     publisher = SanitizedUnicode()
     publication_date = EDTFDateString(required=True)
