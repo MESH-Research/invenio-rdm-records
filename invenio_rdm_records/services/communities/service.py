@@ -12,6 +12,7 @@
 from flask import current_app
 from invenio_access.permissions import system_identity
 from invenio_communities.proxies import current_communities
+from invenio_db import db
 from invenio_drafts_resources.services.records.uow import ParentRecordCommitOp
 from invenio_i18n import lazy_gettext as _
 from invenio_notifications.services.uow import NotificationOp
@@ -454,9 +455,31 @@ class RecordCommunitiesService(Service, RecordIndexerMixin):
             uow=uow,
         )
 
+        # Hooks may mutate record.parent.communities, which can queue rdm_parents_community rows
+        # rows in the DB session and hold updates in the in-memory CommunitiesRelationManager
+        # state. But the record.parent["communities"] dictionary is not updated until the record
+        # commits. This means that record.parent.communities changes from the components are not
+        # persisted in the same resilient way that changes to other record fields are.
+        #
+        # Here, after the components are finished, the loop below calls pid.resolve(record_id)
+        # to re-resolve new record objects from the db session. At this point
+        # record.parent.communities is *re-instantiated* as a new CommunityRelationsManager based
+        # on the record object's stored *dictionary values*. Those were never updated from
+        # the old CommunityRelationsManager state, so the community changes made in the components
+        # (and the linking db table rows) can be effectively dropped.
+        #
+        # The solution is to
+        # - db.session.flush(), writing the queued rdm_parents_community db rows,
+        # - record.parent.communities.refresh() for each affected record,
+        #     forcing the new CommunitiesRelationManager to read the newly written rows
+        #     from the db.
+        db.session.flush()
+
         for record_id in record_ids:
             record = self.record_cls.pid.resolve(record_id)
             community = current_communities.service.record_cls.pid.resolve(community_id)
+            # see the note above
+            record.parent.communities.refresh()
 
             already_included = community.id in record.parent.communities
             if already_included:
