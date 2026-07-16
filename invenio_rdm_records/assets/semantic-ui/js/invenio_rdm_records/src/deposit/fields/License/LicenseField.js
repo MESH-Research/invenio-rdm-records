@@ -55,6 +55,36 @@ class VisibleLicense {
 }
 
 class LicenseFieldForm extends Component {
+  // Maintain stable React keys for list items to avoid triggering
+  // component re-mounts when one item's license content changes. Formik 
+  // has no notion of per-item identity, so we shadow its array operations. 
+  itemKeys = [];
+
+  ensureItemKeys = (length) => {
+    while (this.itemKeys.length < length) {
+      this.itemKeys.push(crypto.randomUUID());
+    }
+    if (this.itemKeys.length > length) {
+      this.itemKeys.length = length;
+    }
+  };
+
+  moveLicense = (from, to) => {
+    const [key] = this.itemKeys.splice(from, 1);
+    this.itemKeys.splice(to, 0, key);
+    this.props.move(from, to);
+  };
+
+  pushLicense = (value) => {
+    this.itemKeys.push(crypto.randomUUID());
+    this.props.push(value);
+  };
+
+  removeLicense = (index) => {
+    this.itemKeys.splice(index, 1);
+    this.props.remove(index);
+  };
+
   render() {
     const {
       label,
@@ -62,9 +92,6 @@ class LicenseFieldForm extends Component {
       fieldPath,
       uiFieldPath,
       form: { values, errors, initialErrors, initialValues },
-      move: formikArrayMove,
-      push: formikArrayPush,
-      remove: formikArrayRemove,
       replace: formikArrayReplace,
       required,
       searchConfig,
@@ -85,6 +112,8 @@ class LicenseFieldForm extends Component {
       className = typeof licenseError !== "string" ? licenseError.severity : "error";
     }
 
+    this.ensureItemKeys(licenseList.length);
+
     return (
       <DndProvider backend={HTML5Backend}>
         <Form.Field required={required} className={className}>
@@ -94,11 +123,11 @@ class LicenseFieldForm extends Component {
               const license = new VisibleLicense(uiRights, value, index);
               return (
                 <LicenseFieldItem
-                  key={license.key}
+                  key={this.itemKeys[index]}
                   license={license}
-                  moveLicense={formikArrayMove}
+                  moveLicense={this.moveLicense}
                   replaceLicense={formikArrayReplace}
-                  removeLicense={formikArrayRemove}
+                  removeLicense={this.removeLicense}
                   searchConfig={searchConfig}
                   serializeLicenses={serializeLicenses}
                 />
@@ -119,9 +148,7 @@ class LicenseFieldForm extends Component {
                 {i18next.t("Add standard")}
               </Button>
             }
-            onLicenseChange={(selectedLicense) => {
-              formikArrayPush(selectedLicense);
-            }}
+            onLicenseChange={this.pushLicense}
             mode="standard"
             action="add"
             serializeLicenses={serializeLicenses}
@@ -140,9 +167,7 @@ class LicenseFieldForm extends Component {
                 {i18next.t("Add custom")}
               </Button>
             }
-            onLicenseChange={(selectedLicense) => {
-              formikArrayPush(selectedLicense);
-            }}
+            onLicenseChange={this.pushLicense}
             mode="custom"
             action="add"
           />
@@ -178,12 +203,9 @@ export class LicenseField extends Component {
   render() {
     const { fieldPath } = this.props;
     return (
-      <FieldArray
-        name={fieldPath}
-        component={(formikProps) => (
-          <LicenseFieldForm {...formikProps} {...this.props} />
-        )}
-      />
+      <FieldArray name={fieldPath}>
+        {(formikProps) => <LicenseFieldForm {...formikProps} {...this.props} />}
+      </FieldArray>
     );
   }
 }
