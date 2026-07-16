@@ -53,9 +53,8 @@ export const LicenseFieldItem = ({
   // Initialize the ref explicitely
   drop(dropRef);
   return (
-    <Ref innerRef={dropRef} key={license.key}>
+    <Ref innerRef={dropRef}>
       <List.Item
-        key={license.key}
         className={hidden ? "deposit-drag-listitem hidden" : "deposit-drag-listitem"}
       >
         <List.Content floated="right">

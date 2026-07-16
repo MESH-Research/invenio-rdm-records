@@ -55,12 +55,18 @@ export class LicenseModal extends Component {
     mode: ModalTypes.STANDARD,
   };
 
+  triggerRef = React.createRef();
+
   openModal = () => {
     this.setState({ open: true });
   };
 
   closeModal = () => {
-    this.setState({ open: false });
+    this.setState({ open: false }, () => {
+      setTimeout(() => {
+        this.triggerRef.current?.focus();
+      }, 0);
+    });
   };
 
   setMode = (mode) => {
@@ -116,6 +122,7 @@ export class LicenseModal extends Component {
               this.setMode(mode);
             }}
             open={open}
+            triggerRef={this.triggerRef}
             trigger={React.cloneElement(trigger, {
               "aria-expanded": open,
               "aria-haspopup": "dialog",
