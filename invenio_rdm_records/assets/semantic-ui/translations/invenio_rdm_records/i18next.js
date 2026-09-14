@@ -23,6 +23,9 @@ const options = {
     // cache user language off
     caches: [],
   },
+  interpolation: {
+    escapeValue: false, // not needed for react as it escapes by default
+  },
   react: {
     // Set empty - to allow html tags convert to trans tags
     // HTML TAG | Trans TAG
